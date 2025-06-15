@@ -1,11 +1,15 @@
 import { create } from 'zustand';
 import { ParkingSpot, Booking, User, Vehicle } from '../types';
+import { authService } from '../services/authService';
+import { parkingSpotService } from '../services/parkingSpotService';
+import { bookingService } from '../services/bookingService';
+import { userService } from '../services/userService';
 
 interface AppState {
   // User state
   user: User | null;
   isAuthenticated: boolean;
-  userType: 'customer' | 'admin';
+  userType: 'CUSTOMER' | 'OWNER' | 'ADMIN';
   
   // Parking spots
   parkingSpots: ParkingSpot[];
@@ -22,20 +26,32 @@ interface AppState {
     amenities: string[];
   };
   
+  // Loading states
+  loading: {
+    spots: boolean;
+    bookings: boolean;
+    auth: boolean;
+  };
+  
   // Actions
   setUser: (user: User | null) => void;
-  setUserType: (type: 'customer' | 'admin') => void;
+  setUserType: (type: 'CUSTOMER' | 'OWNER' | 'ADMIN') => void;
   login: (email: string, password: string) => Promise<boolean>;
+  register: (data: any) => Promise<boolean>;
   logout: () => void;
   
   // Parking spots actions
-  addParkingSpot: (spot: Omit<ParkingSpot, 'id'>) => void;
-  updateParkingSpot: (id: string, updates: Partial<ParkingSpot>) => void;
-  deleteParkingSpot: (id: string) => void;
+  fetchParkingSpots: (filters?: any) => Promise<void>;
+  addParkingSpot: (spot: any) => Promise<void>;
+  updateParkingSpot: (id: string, updates: any) => Promise<void>;
+  deleteParkingSpot: (id: string) => Promise<void>;
   
   // Booking actions
-  createBooking: (booking: Omit<Booking, 'id' | 'qrCode' | 'pin' | 'createdAt'>) => Booking;
-  validateEntry: (code: string) => Booking | null;
+  createBooking: (booking: any) => Promise<Booking>;
+  fetchBookings: () => Promise<void>;
+  extendBooking: (id: string) => Promise<void>;
+  cancelBooking: (id: string) => Promise<void>;
+  validateEntry: (code: string) => Promise<any>;
   
   // Search and filter
   setSearchQuery: (query: string) => void;
@@ -43,82 +59,21 @@ interface AppState {
   applyFilters: () => void;
   
   // Vehicle management
-  addVehicle: (vehicle: Omit<Vehicle, 'id'>) => void;
-  updateVehicle: (id: string, updates: Partial<Vehicle>) => void;
-  deleteVehicle: (id: string) => void;
+  addVehicle: (vehicle: any) => Promise<void>;
+  updateVehicle: (id: string, updates: any) => Promise<void>;
+  deleteVehicle: (id: string) => Promise<void>;
+  
+  // Initialize app
+  initializeApp: () => Promise<void>;
 }
-
-// Mock initial data
-const mockUser: User = {
-  id: 'user1',
-  name: 'John Doe',
-  email: 'john.doe@example.com',
-  phone: '+1 (555) 123-4567',
-  vehicles: [
-    {
-      id: 'v1',
-      make: 'Toyota',
-      model: 'Camry',
-      licensePlate: 'ABC-123',
-      color: 'Silver'
-    }
-  ]
-};
-
-const mockParkingSpots: ParkingSpot[] = [
-  {
-    id: '1',
-    name: 'Central Plaza Parking',
-    address: '123 Main Street, Downtown',
-    price: 25,
-    priceType: 'hour',
-    totalSlots: 50,
-    availableSlots: 12,
-    rating: 4.5,
-    reviewCount: 128,
-    images: [
-      'https://images.pexels.com/photos/753876/pexels-photo-753876.jpeg?auto=compress&cs=tinysrgb&w=800',
-      'https://images.pexels.com/photos/164634/pexels-photo-164634.jpeg?auto=compress&cs=tinysrgb&w=800'
-    ],
-    amenities: ['CCTV Security', 'EV Charging', 'Covered Parking', 'Elevator Access'],
-    openingHours: '24/7',
-    phone: '+1 (555) 123-4567',
-    description: 'Premium parking facility in the heart of downtown with state-of-the-art security and amenities.',
-    lat: 40.7589,
-    lng: -73.9851,
-    ownerId: 'owner1'
-  },
-  {
-    id: '2',
-    name: 'Riverside Mall Parking',
-    address: '456 River Road, Westside',
-    price: 150,
-    priceType: 'day',
-    totalSlots: 200,
-    availableSlots: 45,
-    rating: 4.2,
-    reviewCount: 89,
-    images: [
-      'https://images.pexels.com/photos/1004409/pexels-photo-1004409.jpeg?auto=compress&cs=tinysrgb&w=800',
-      'https://images.pexels.com/photos/2199293/pexels-photo-2199293.jpeg?auto=compress&cs=tinysrgb&w=800'
-    ],
-    amenities: ['Shopping Access', 'Food Court Nearby', 'Valet Service', 'Car Wash'],
-    openingHours: '6:00 AM - 11:00 PM',
-    phone: '+1 (555) 987-6543',
-    description: 'Convenient mall parking with direct access to shopping and dining.',
-    lat: 40.7505,
-    lng: -73.9934,
-    ownerId: 'owner2'
-  }
-];
 
 export const useAppStore = create<AppState>((set, get) => ({
   // Initial state
   user: null,
   isAuthenticated: false,
-  userType: 'customer',
-  parkingSpots: mockParkingSpots,
-  filteredSpots: mockParkingSpots,
+  userType: 'CUSTOMER',
+  parkingSpots: [],
+  filteredSpots: [],
   bookings: [],
   searchQuery: '',
   filters: {
@@ -126,96 +81,195 @@ export const useAppStore = create<AppState>((set, get) => ({
     parkingType: 'all',
     amenities: []
   },
+  loading: {
+    spots: false,
+    bookings: false,
+    auth: false
+  },
 
   // User actions
   setUser: (user) => set({ user, isAuthenticated: !!user }),
   setUserType: (userType) => set({ userType }),
   
   login: async (email, password) => {
-    // Mock login logic
-    if (email.includes('owner') || email.includes('admin')) {
+    try {
+      set(state => ({ loading: { ...state.loading, auth: true } }));
+      const response = await authService.login({ email, password });
+      
       set({ 
-        user: { ...mockUser, email }, 
+        user: response.user, 
         isAuthenticated: true, 
-        userType: 'admin' 
+        userType: response.user.role,
+        loading: { ...get().loading, auth: false }
       });
-    } else {
-      set({ 
-        user: { ...mockUser, email }, 
-        isAuthenticated: true, 
-        userType: 'customer' 
-      });
+      
+      return true;
+    } catch (error) {
+      set(state => ({ loading: { ...state.loading, auth: false } }));
+      console.error('Login error:', error);
+      return false;
     }
-    return true;
   },
   
-  logout: () => set({ 
-    user: null, 
-    isAuthenticated: false, 
-    userType: 'customer',
-    bookings: []
-  }),
+  register: async (data) => {
+    try {
+      set(state => ({ loading: { ...state.loading, auth: true } }));
+      const response = await authService.register(data);
+      
+      set({ 
+        user: response.user, 
+        isAuthenticated: true, 
+        userType: response.user.role,
+        loading: { ...get().loading, auth: false }
+      });
+      
+      return true;
+    } catch (error) {
+      set(state => ({ loading: { ...state.loading, auth: false } }));
+      console.error('Register error:', error);
+      return false;
+    }
+  },
+  
+  logout: () => {
+    authService.logout();
+    set({ 
+      user: null, 
+      isAuthenticated: false, 
+      userType: 'CUSTOMER',
+      bookings: [],
+      parkingSpots: [],
+      filteredSpots: []
+    });
+  },
 
   // Parking spots actions
-  addParkingSpot: (spotData) => {
-    const newSpot: ParkingSpot = {
-      ...spotData,
-      id: Date.now().toString(),
-      availableSlots: spotData.totalSlots,
-      rating: 0,
-      reviewCount: 0,
-      ownerId: get().user?.id || 'unknown'
-    };
-    
-    set(state => ({
-      parkingSpots: [...state.parkingSpots, newSpot],
-      filteredSpots: [...state.filteredSpots, newSpot]
-    }));
+  fetchParkingSpots: async (filters = {}) => {
+    try {
+      set(state => ({ loading: { ...state.loading, spots: true } }));
+      const response = await parkingSpotService.getParkingSpots(filters);
+      
+      set({ 
+        parkingSpots: response.spots,
+        filteredSpots: response.spots,
+        loading: { ...get().loading, spots: false }
+      });
+    } catch (error) {
+      set(state => ({ loading: { ...state.loading, spots: false } }));
+      console.error('Fetch parking spots error:', error);
+    }
   },
 
-  updateParkingSpot: (id, updates) => {
-    set(state => ({
-      parkingSpots: state.parkingSpots.map(spot => 
-        spot.id === id ? { ...spot, ...updates } : spot
-      ),
-      filteredSpots: state.filteredSpots.map(spot => 
-        spot.id === id ? { ...spot, ...updates } : spot
-      )
-    }));
+  addParkingSpot: async (spotData) => {
+    try {
+      const response = await parkingSpotService.createParkingSpot(spotData);
+      const newSpot = response.spot;
+      
+      set(state => ({
+        parkingSpots: [...state.parkingSpots, newSpot],
+        filteredSpots: [...state.filteredSpots, newSpot]
+      }));
+    } catch (error) {
+      console.error('Add parking spot error:', error);
+      throw error;
+    }
   },
 
-  deleteParkingSpot: (id) => {
-    set(state => ({
-      parkingSpots: state.parkingSpots.filter(spot => spot.id !== id),
-      filteredSpots: state.filteredSpots.filter(spot => spot.id !== id)
-    }));
+  updateParkingSpot: async (id, updates) => {
+    try {
+      const response = await parkingSpotService.updateParkingSpot(id, updates);
+      const updatedSpot = response.spot;
+      
+      set(state => ({
+        parkingSpots: state.parkingSpots.map(spot => 
+          spot.id === id ? updatedSpot : spot
+        ),
+        filteredSpots: state.filteredSpots.map(spot => 
+          spot.id === id ? updatedSpot : spot
+        )
+      }));
+    } catch (error) {
+      console.error('Update parking spot error:', error);
+      throw error;
+    }
+  },
+
+  deleteParkingSpot: async (id) => {
+    try {
+      await parkingSpotService.deleteParkingSpot(id);
+      
+      set(state => ({
+        parkingSpots: state.parkingSpots.filter(spot => spot.id !== id),
+        filteredSpots: state.filteredSpots.filter(spot => spot.id !== id)
+      }));
+    } catch (error) {
+      console.error('Delete parking spot error:', error);
+      throw error;
+    }
   },
 
   // Booking actions
-  createBooking: (bookingData) => {
-    const qrCode = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const pin = Math.floor(1000 + Math.random() * 9000).toString();
-    
-    const newBooking: Booking = {
-      ...bookingData,
-      id: `BK-${Date.now()}`,
-      qrCode,
-      pin,
-      createdAt: new Date().toISOString()
-    };
-    
-    set(state => ({
-      bookings: [...state.bookings, newBooking]
-    }));
-    
-    return newBooking;
+  createBooking: async (bookingData) => {
+    try {
+      const response = await bookingService.createBooking(bookingData);
+      const newBooking = response.booking;
+      
+      set(state => ({
+        bookings: [...state.bookings, newBooking]
+      }));
+      
+      return newBooking;
+    } catch (error) {
+      console.error('Create booking error:', error);
+      throw error;
+    }
   },
 
-  validateEntry: (code) => {
-    const bookings = get().bookings;
-    return bookings.find(booking => 
-      booking.qrCode === code || booking.pin === code
-    ) || null;
+  fetchBookings: async () => {
+    try {
+      set(state => ({ loading: { ...state.loading, bookings: true } }));
+      const response = await bookingService.getMyBookings();
+      
+      set({ 
+        bookings: response.bookings,
+        loading: { ...get().loading, bookings: false }
+      });
+    } catch (error) {
+      set(state => ({ loading: { ...state.loading, bookings: false } }));
+      console.error('Fetch bookings error:', error);
+    }
+  },
+
+  extendBooking: async (id) => {
+    try {
+      await bookingService.extendBooking(id);
+      // Refresh bookings
+      await get().fetchBookings();
+    } catch (error) {
+      console.error('Extend booking error:', error);
+      throw error;
+    }
+  },
+
+  cancelBooking: async (id) => {
+    try {
+      await bookingService.cancelBooking(id);
+      // Refresh bookings
+      await get().fetchBookings();
+    } catch (error) {
+      console.error('Cancel booking error:', error);
+      throw error;
+    }
+  },
+
+  validateEntry: async (code) => {
+    try {
+      const response = await bookingService.validateEntry(code);
+      return response;
+    } catch (error) {
+      console.error('Validate entry error:', error);
+      throw error;
+    }
   },
 
   // Search and filter
@@ -276,37 +330,66 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // Vehicle management
-  addVehicle: (vehicleData) => {
-    const newVehicle: Vehicle = {
-      ...vehicleData,
-      id: Date.now().toString()
-    };
-    
-    set(state => ({
-      user: state.user ? {
-        ...state.user,
-        vehicles: [...state.user.vehicles, newVehicle]
-      } : state.user
-    }));
+  addVehicle: async (vehicleData) => {
+    try {
+      const response = await userService.addVehicle(vehicleData);
+      // Refresh user data to get updated vehicles
+      const updatedUser = await userService.getProfile();
+      set({ user: updatedUser });
+    } catch (error) {
+      console.error('Add vehicle error:', error);
+      throw error;
+    }
   },
 
-  updateVehicle: (id, updates) => {
-    set(state => ({
-      user: state.user ? {
-        ...state.user,
-        vehicles: state.user.vehicles.map(vehicle =>
-          vehicle.id === id ? { ...vehicle, ...updates } : vehicle
-        )
-      } : state.user
-    }));
+  updateVehicle: async (id, updates) => {
+    try {
+      await userService.updateVehicle(id, updates);
+      // Refresh user data to get updated vehicles
+      const updatedUser = await userService.getProfile();
+      set({ user: updatedUser });
+    } catch (error) {
+      console.error('Update vehicle error:', error);
+      throw error;
+    }
   },
 
-  deleteVehicle: (id) => {
-    set(state => ({
-      user: state.user ? {
-        ...state.user,
-        vehicles: state.user.vehicles.filter(vehicle => vehicle.id !== id)
-      } : state.user
-    }));
+  deleteVehicle: async (id) => {
+    try {
+      await userService.deleteVehicle(id);
+      // Refresh user data to get updated vehicles
+      const updatedUser = await userService.getProfile();
+      set({ user: updatedUser });
+    } catch (error) {
+      console.error('Delete vehicle error:', error);
+      throw error;
+    }
+  },
+
+  // Initialize app
+  initializeApp: async () => {
+    try {
+      if (authService.isAuthenticated()) {
+        const user = await authService.getCurrentUser();
+        set({ 
+          user, 
+          isAuthenticated: true, 
+          userType: user.role 
+        });
+        
+        // Fetch initial data
+        await get().fetchParkingSpots();
+        await get().fetchBookings();
+      }
+    } catch (error) {
+      console.error('Initialize app error:', error);
+      // If token is invalid, logout
+      authService.logout();
+      set({ 
+        user: null, 
+        isAuthenticated: false, 
+        userType: 'CUSTOMER' 
+      });
+    }
   }
 }));

@@ -1,0 +1,226 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  OWNER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  EXTENDED
+}
+
+enum ParkingSpotStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  QR_PAYMENT
+  E_WALLET
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  role      UserRole @default(CUSTOMER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Customer specific fields
+  vehicles Vehicle[]
+  bookings Booking[]
+  reviews  Review[]
+
+  // Owner specific fields
+  parkingSpots ParkingSpot[]
+  businessName String?
+  businessAddress String?
+
+  // Notifications
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Vehicle {
+  id           String @id @default(cuid())
+  make         String
+  model        String
+  licensePlate String
+  color        String
+  userId       String
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bookings Booking[]
+
+  @@map("vehicles")
+}
+
+model ParkingSpot {
+  id            String            @id @default(cuid())
+  name          String
+  description   String?
+  address       String
+  latitude      Float
+  longitude     Float
+  price         Float
+  priceType     String            // 'hour', 'day', 'month'
+  totalSlots    Int
+  availableSlots Int
+  rating        Float             @default(0)
+  reviewCount   Int               @default(0)
+  amenities     String[]          // Array of amenity strings
+  images        String[]          // Array of image URLs
+  openingHours  String
+  phone         String?
+  status        ParkingSpotStatus @default(ACTIVE)
+  ownerId       String
+  owner         User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  bookings         Booking[]
+  reviews          Review[]
+  availabilitySlots AvailabilitySlot[]
+
+  @@map("parking_spots")
+}
+
+model AvailabilitySlot {
+  id          String      @id @default(cuid())
+  spotId      String
+  spot        ParkingSpot @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  date        DateTime
+  startTime   String      // Format: "HH:MM"
+  endTime     String      // Format: "HH:MM"
+  status      String      // 'available', 'blocked', 'maintenance'
+  reason      String?
+  slotsAffected Int       @default(1)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("availability_slots")
+}
+
+model Booking {
+  id          String        @id @default(cuid())
+  spotId      String
+  spot        ParkingSpot   @relation(fields: [spotId], references: [id])
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  vehicleId   String
+  vehicle     Vehicle       @relation(fields: [vehicleId], references: [id])
+  startTime   DateTime
+  endTime     DateTime
+  actualEndTime DateTime?   // When user actually exits
+  reservedEndTime DateTime  // Always startTime + booked duration + 1 hour buffer
+  totalCost   Float
+  status      BookingStatus @default(PENDING)
+  qrCode      String        @unique
+  pin         String
+  isExtended  Boolean       @default(false)
+  extendedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  payment Payment?
+  entryLogs EntryLog[]
+
+  @@map("bookings")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  bookingId     String        @unique
+  booking       Booking       @relation(fields: [bookingId], references: [id])
+  amount        Float
+  method        PaymentMethod
+  status        PaymentStatus @default(PENDING)
+  transactionId String?
+  processedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("payments")
+}
+
+model EntryLog {
+  id        String   @id @default(cuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  action    String   // 'ENTRY', 'EXIT', 'EXTEND'
+  timestamp DateTime @default(now())
+  method    String   // 'QR', 'PIN'
+  code      String   // The QR code or PIN used
+
+  @@map("entry_logs")
+}
+
+model Review {
+  id        String      @id @default(cuid())
+  spotId    String
+  spot      ParkingSpot @relation(fields: [spotId], references: [id])
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  rating    Int         // 1-5 stars
+  comment   String?
+  photos    String[]    // Array of photo URLs
+  isAnonymous Boolean   @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@map("reviews")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   // 'BOOKING', 'PAYMENT', 'REMINDER', 'SYSTEM'
+  isRead    Boolean  @default(false)
+  data      Json?    // Additional data for the notification
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+model SystemSettings {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  description String?
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}

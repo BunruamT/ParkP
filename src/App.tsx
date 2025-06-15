@@ -14,7 +14,23 @@ import { ManageAvailability } from './pages/ManageAvailability';
 import { useAppStore } from './store/AppStore';
 
 function App() {
-  const { isAuthenticated, userType } = useAppStore();
+  const { isAuthenticated, userType, initializeApp, loading } = useAppStore();
+
+  useEffect(() => {
+    initializeApp();
+  }, [initializeApp]);
+
+  // Show loading spinner while initializing
+  if (loading.auth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Router>
@@ -23,7 +39,7 @@ function App() {
           {/* Auth Routes */}
           <Route 
             path="/login" 
-            element={!isAuthenticated ? <LoginPage /> : <Navigate to={userType === 'admin' ? '/admin' : '/'} />} 
+            element={!isAuthenticated ? <LoginPage /> : <Navigate to={userType === 'OWNER' || userType === 'ADMIN' ? '/admin' : '/'} />} 
           />
           
           {/* Protected Routes */}
@@ -34,7 +50,7 @@ function App() {
                 <div className="pt-16">
                   <Routes>
                     {/* Customer Routes */}
-                    {userType === 'customer' && (
+                    {userType === 'CUSTOMER' && (
                       <>
                         <Route path="/" element={<HomePage />} />
                         <Route path="/spot/:id" element={<ParkingSpotDetail />} />
@@ -46,8 +62,8 @@ function App() {
                       </>
                     )}
                     
-                    {/* Admin Routes */}
-                    {userType === 'admin' && (
+                    {/* Owner/Admin Routes */}
+                    {(userType === 'OWNER' || userType === 'ADMIN') && (
                       <>
                         <Route path="/admin" element={<AdminDashboard />} />
                         <Route path="/admin/add-spot" element={<AddParkingSpot />} />
@@ -62,7 +78,7 @@ function App() {
                     )}
                     
                     {/* Fallback */}
-                    <Route path="*" element={<Navigate to={userType === 'admin' ? '/admin' : '/'} />} />
+                    <Route path="*" element={<Navigate to={userType === 'OWNER' || userType === 'ADMIN' ? '/admin' : '/'} />} />
                   </Routes>
                 </div>
               </>
