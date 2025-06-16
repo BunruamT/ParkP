@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   BarChart3, 
@@ -36,7 +36,14 @@ export const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'dashboard' | 'spots' | 'bookings' | 'reviews' | 'reports' | 'settings'>('home');
   const [showValidationSystem, setShowValidationSystem] = useState(false);
   
-  const { parkingSpots, bookings, user } = useAppStore();
+  const { parkingSpots, bookings, user, fetchParkingSpots, fetchBookings, loading } = useAppStore();
+
+  useEffect(() => {
+    if (user) {
+      fetchParkingSpots();
+      fetchBookings();
+    }
+  }, [user, fetchParkingSpots, fetchBookings]);
   
   // Filter spots owned by current user
   const mySpots = parkingSpots.filter(spot => spot.ownerId === user?.id);
@@ -279,7 +286,12 @@ export const AdminDashboard: React.FC = () => {
           </Link>
         </div>
 
-        {mySpots.length > 0 ? (
+        {loading.spots ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading parking spots...</p>
+          </div>
+        ) : mySpots.length > 0 ? (
           <div className="space-y-4">
             {mySpots.map((spot) => {
               const spotBookings = myBookings.filter(b => b.spotId === spot.id);
@@ -377,7 +389,12 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
         
-        {myBookings.length > 0 ? (
+        {loading.bookings ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading bookings...</p>
+          </div>
+        ) : myBookings.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -651,6 +668,17 @@ export const AdminDashboard: React.FC = () => {
       default: return <HomeSection />;
     }
   };
+
+  if (loading.auth) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

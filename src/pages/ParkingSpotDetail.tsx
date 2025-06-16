@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   MapPin, 
@@ -14,28 +14,71 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { useAppStore } from '../store/AppStore';
-import { mockReviews } from '../data/mockData';
+import { supabase } from '../lib/supabase';
+
+interface Review {
+  id: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+  users: {
+    name: string;
+  };
+}
 
 export const ParkingSpotDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [isFavorited, setIsFavorited] = useState(false);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(true);
   
-  // Get parking spots from store instead of mock data
-  const { parkingSpots } = useAppStore();
+  const { parkingSpots, fetchParkingSpots } = useAppStore();
   const spot = parkingSpots.find(s => s.id === id);
-  const reviews = mockReviews.filter(r => r.spotId === id);
+
+  useEffect(() => {
+    if (!spot && id) {
+      fetchParkingSpots();
+    }
+  }, [spot, id, fetchParkingSpots]);
+
+  useEffect(() => {
+    if (id) {
+      fetchReviews();
+    }
+  }, [id]);
+
+  const fetchReviews = async () => {
+    try {
+      setLoadingReviews(true);
+      const { data, error } = await supabase
+        .from('reviews')
+        .select(`
+          id,
+          rating,
+          comment,
+          created_at,
+          users!inner(name)
+        `)
+        .eq('spot_id', id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setReviews(data || []);
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
 
   if (!spot) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
-            Parking spot not found
-          </h2>
-          <Link to="/" className="text-blue-600 hover:text-blue-800">
-            Return to home
-          </Link>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading parking spot...</p>
         </div>
       </div>
     );
@@ -173,43 +216,50 @@ export const ParkingSpotDetail: React.FC = () => {
               <h3 className="text-lg font-semibold text-gray-900 mb-3">
                 Recent Reviews
               </h3>
-              <div className="space-y-4">
-                {reviews.length > 0 ? (
-                  reviews.map((review) => (
-                    <div key={review.id} className="p-4 bg-gray-50 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-semibold text-gray-900">
-                            {review.userName}
-                          </span>
-                          <div className="flex items-center space-x-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                className={`h-4 w-4 ${
-                                  i < review.rating
-                                    ? 'text-yellow-400 fill-current'
-                                    : 'text-gray-300'
-                                }`}
-                              />
-                            ))}
+              {loadingReviews ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                  <p className="text-gray-500">Loading reviews...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {reviews.length > 0 ? (
+                    reviews.map((review) => (
+                      <div key={review.id} className="p-4 bg-gray-50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-semibold text-gray-900">
+                              {review.users.name}
+                            </span>
+                            <div className="flex items-center space-x-1">
+                              {[...Array(5)].map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`h-4 w-4 ${
+                                    i < review.rating
+                                      ? 'text-yellow-400 fill-current'
+                                      : 'text-gray-300'
+                                  }`}
+                                />
+                              ))}
+                            </div>
                           </div>
+                          <span className="text-sm text-gray-500">
+                            {new Date(review.created_at).toLocaleDateString()}
+                          </span>
                         </div>
-                        <span className="text-sm text-gray-500">
-                          {new Date(review.createdAt).toLocaleDateString()}
-                        </span>
+                        <p className="text-gray-700">{review.comment}</p>
                       </div>
-                      <p className="text-gray-700">{review.comment}</p>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <Star className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <p>No reviews yet</p>
+                      <p className="text-sm">Be the first to review this parking spot!</p>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <Star className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                    <p>No reviews yet</p>
-                    <p className="text-sm">Be the first to review this parking spot!</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}

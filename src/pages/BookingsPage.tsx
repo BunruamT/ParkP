@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Calendar, 
@@ -17,7 +17,7 @@ import {
   CheckCircle,
   XCircle
 } from 'lucide-react';
-import { mockBookings, mockParkingSpots } from '../data/mockData';
+import { useAppStore } from '../store/AppStore';
 import { QRCodeGenerator } from '../components/QRCodeGenerator';
 import { RatingReviewModal } from '../components/RatingReviewModal';
 
@@ -28,10 +28,16 @@ export const BookingsPage: React.FC = () => {
   const [showReviewModal, setShowReviewModal] = useState<string | null>(null);
   const [extendHours, setExtendHours] = useState(1);
   
-  const currentBookings = mockBookings.filter(b => 
+  const { bookings, parkingSpots, fetchBookings, loading } = useAppStore();
+
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+  
+  const currentBookings = bookings.filter(b => 
     b.status === 'pending' || b.status === 'active'
   );
-  const pastBookings = mockBookings.filter(b => 
+  const pastBookings = bookings.filter(b => 
     b.status === 'completed' || b.status === 'cancelled'
   );
 
@@ -73,8 +79,8 @@ export const BookingsPage: React.FC = () => {
   };
 
   const handleSubmitReview = async (rating: number, review: string, photos: string[]) => {
-    const booking = mockBookings.find(b => b.id === showReviewModal);
-    const spot = mockParkingSpots.find(s => s.id === booking?.spotId);
+    const booking = bookings.find(b => b.id === showReviewModal);
+    const spot = parkingSpots.find(s => s.id === booking?.spotId);
     
     console.log('Submitting review:', {
       bookingId: showReviewModal,
@@ -93,11 +99,22 @@ export const BookingsPage: React.FC = () => {
     setShowReviewModal(null);
   };
 
+  const getSpotName = (spotId: string) => {
+    const spot = parkingSpots.find(s => s.id === spotId);
+    return spot?.name || 'Unknown Parking Spot';
+  };
+
+  const getSpotAddress = (spotId: string) => {
+    const spot = parkingSpots.find(s => s.id === spotId);
+    return spot?.address || 'Unknown Address';
+  };
+
   const BookingCard: React.FC<{ booking: any; showActions?: boolean }> = ({ 
     booking, 
     showActions = false 
   }) => {
-    const spot = mockParkingSpots.find(s => s.id === booking.spotId);
+    const spotName = getSpotName(booking.spotId);
+    const spotAddress = getSpotAddress(booking.spotId);
     const startDateTime = formatDateTime(booking.startTime);
     const endDateTime = formatDateTime(booking.endTime);
 
@@ -106,11 +123,11 @@ export const BookingsPage: React.FC = () => {
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <h3 className="text-lg font-semibold text-gray-900 mb-1">
-              {spot?.name}
+              {spotName}
             </h3>
             <div className="flex items-center space-x-1 text-gray-600 mb-2">
               <MapPin className="h-4 w-4" />
-              <span className="text-sm">{spot?.address}</span>
+              <span className="text-sm">{spotAddress}</span>
             </div>
             <div className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
               getBookingStatusColor(booking.status)
@@ -242,6 +259,17 @@ export const BookingsPage: React.FC = () => {
     );
   };
 
+  if (loading.bookings) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading bookings...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 py-8">
@@ -349,7 +377,7 @@ export const BookingsPage: React.FC = () => {
 
                 <div className="text-center">
                   <QRCodeGenerator 
-                    value={mockBookings.find(b => b.id === showQRModal)?.qrCode || ''} 
+                    value={bookings.find(b => b.id === showQRModal)?.qrCode || ''} 
                     size={200}
                     className="mb-4"
                   />
@@ -357,14 +385,14 @@ export const BookingsPage: React.FC = () => {
                   <div className="bg-blue-50 rounded-lg p-4 mb-4">
                     <div className="text-sm text-blue-700 mb-2">Backup PIN Code</div>
                     <div className="text-3xl font-bold font-mono text-blue-900 mb-2">
-                      {mockBookings.find(b => b.id === showQRModal)?.pin}
+                      {bookings.find(b => b.id === showQRModal)?.pin}
                     </div>
                     <div className="text-xs text-blue-600">Use if QR scanner doesn't work</div>
                   </div>
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => copyToClipboard(mockBookings.find(b => b.id === showQRModal)?.qrCode || '', 'QR Code')}
+                      onClick={() => copyToClipboard(bookings.find(b => b.id === showQRModal)?.qrCode || '', 'QR Code')}
                       className="flex-1 flex items-center justify-center space-x-1 border border-blue-200 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
                     >
                       <Copy className="h-4 w-4" />
@@ -403,7 +431,7 @@ export const BookingsPage: React.FC = () => {
                   <div className="bg-gray-50 rounded-lg p-4 mb-4">
                     <div className="text-sm text-gray-600 mb-1">Current booking ends at:</div>
                     <div className="font-semibold text-gray-900">
-                      {formatDateTime(mockBookings.find(b => b.id === showExtendModal)?.endTime || '').time}
+                      {formatDateTime(bookings.find(b => b.id === showExtendModal)?.endTime || '').time}
                     </div>
                   </div>
 
@@ -469,7 +497,7 @@ export const BookingsPage: React.FC = () => {
         <RatingReviewModal
           isOpen={showReviewModal !== null}
           onClose={() => setShowReviewModal(null)}
-          spotName={mockParkingSpots.find(s => s.id === mockBookings.find(b => b.id === showReviewModal)?.spotId)?.name || ''}
+          spotName={getSpotName(bookings.find(b => b.id === showReviewModal)?.spotId || '')}
           bookingId={showReviewModal || ''}
           onSubmit={handleSubmitReview}
         />

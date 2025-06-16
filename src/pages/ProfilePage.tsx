@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User, 
   Car, 
@@ -11,12 +11,69 @@ import {
   Trash2,
   Download
 } from 'lucide-react';
-import { mockUser } from '../data/mockData';
+import { useAppStore } from '../store/AppStore';
+import { supabase } from '../lib/supabase';
+
+interface PaymentRecord {
+  id: string;
+  amount: number;
+  method: string;
+  status: string;
+  created_at: string;
+  bookings: {
+    parking_spots: {
+      name: string;
+    };
+  };
+}
 
 export const ProfilePage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<'profile' | 'vehicles' | 'receipts' | 'settings'>('profile');
-  const [user, setUser] = useState(mockUser);
-  const [editingVehicle, setEditingVehicle] = useState<string | null>(null);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  
+  const { user, vehicles, fetchVehicles, logout } = useAppStore();
+
+  useEffect(() => {
+    if (user) {
+      fetchVehicles();
+    }
+  }, [user, fetchVehicles]);
+
+  useEffect(() => {
+    if (activeSection === 'receipts' && user) {
+      fetchPayments();
+    }
+  }, [activeSection, user]);
+
+  const fetchPayments = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingPayments(true);
+      const { data, error } = await supabase
+        .from('payments')
+        .select(`
+          id,
+          amount,
+          method,
+          status,
+          created_at,
+          bookings!inner(
+            parking_spots!inner(name)
+          )
+        `)
+        .eq('bookings.user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setPayments(data || []);
+    } catch (error) {
+      console.error('Error fetching payments:', error);
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
 
   const menuItems = [
     { id: 'profile', label: 'Profile Info', icon: User },
@@ -25,22 +82,9 @@ export const ProfilePage: React.FC = () => {
     { id: 'settings', label: 'Settings', icon: Shield },
   ];
 
-  const mockReceipts = [
-    {
-      id: 'r1',
-      date: '2024-01-15',
-      spotName: 'Central Plaza Parking',
-      amount: 200,
-      method: 'Credit Card'
-    },
-    {
-      id: 'r2', 
-      date: '2024-01-12',
-      spotName: 'Riverside Mall Parking',
-      amount: 100,
-      method: 'QR Payment'
-    }
-  ];
+  const handleLogout = () => {
+    logout();
+  };
 
   const ProfileSection = () => (
     <div className="space-y-6">
@@ -60,7 +104,7 @@ export const ProfilePage: React.FC = () => {
             </label>
             <input
               type="text"
-              value={user.name}
+              value={user?.name || ''}
               readOnly
               className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
             />
@@ -71,7 +115,7 @@ export const ProfilePage: React.FC = () => {
             </label>
             <input
               type="email"
-              value={user.email}
+              value={user?.email || ''}
               readOnly
               className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
             />
@@ -82,7 +126,7 @@ export const ProfilePage: React.FC = () => {
             </label>
             <input
               type="tel"
-              value={user.phone}
+              value={user?.phone || ''}
               readOnly
               className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
             />
@@ -115,33 +159,41 @@ export const ProfilePage: React.FC = () => {
         </div>
 
         <div className="space-y-4">
-          {user.vehicles.map((vehicle) => (
-            <div key={vehicle.id} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Car className="h-6 w-6 text-blue-600" />
+          {vehicles.length > 0 ? (
+            vehicles.map((vehicle) => (
+              <div key={vehicle.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <Car className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900">
+                        {vehicle.make} {vehicle.model}
+                      </h4>
+                      <p className="text-sm text-gray-600">
+                        {vehicle.licensePlate} • {vehicle.color}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">
-                      {vehicle.make} {vehicle.model}
-                    </h4>
-                    <p className="text-sm text-gray-600">
-                      {vehicle.licensePlate} • {vehicle.color}
-                    </p>
+                  <div className="flex items-center space-x-2">
+                    <button className="p-2 text-gray-600 hover:text-blue-600 transition-colors">
+                      <Edit className="h-4 w-4" />
+                    </button>
+                    <button className="p-2 text-gray-600 hover:text-red-600 transition-colors">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button className="p-2 text-gray-600 hover:text-blue-600 transition-colors">
-                    <Edit className="h-4 w-4" />
-                  </button>
-                  <button className="p-2 text-gray-600 hover:text-red-600 transition-colors">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
                 </div>
               </div>
+            ))
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <Car className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p>No vehicles added yet</p>
+              <p className="text-sm">Add a vehicle to start booking parking spots</p>
             </div>
-          ))}
+          )}
         </div>
       </div>
     </div>
@@ -158,32 +210,55 @@ export const ProfilePage: React.FC = () => {
           </button>
         </div>
 
-        <div className="space-y-4">
-          {mockReceipts.map((receipt) => (
-            <div key={receipt.id} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-semibold text-gray-900">
-                    {receipt.spotName}
-                  </h4>
-                  <div className="flex items-center space-x-4 text-sm text-gray-600">
-                    <span>{new Date(receipt.date).toLocaleDateString()}</span>
-                    <span>•</span>
-                    <span>{receipt.method}</span>
+        {loadingPayments ? (
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading payment history...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {payments.length > 0 ? (
+              payments.map((payment) => (
+                <div key={payment.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-gray-900">
+                        {payment.bookings.parking_spots.name}
+                      </h4>
+                      <div className="flex items-center space-x-4 text-sm text-gray-600">
+                        <span>{new Date(payment.created_at).toLocaleDateString()}</span>
+                        <span>•</span>
+                        <span>{payment.method}</span>
+                        <span>•</span>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                          payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {payment.status}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-semibold text-gray-900">
+                        ${payment.amount}
+                      </div>
+                      <button className="text-sm text-blue-600 hover:text-blue-800 transition-colors">
+                        Download
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">
-                    ${receipt.amount}
-                  </div>
-                  <button className="text-sm text-blue-600 hover:text-blue-800 transition-colors">
-                    Download
-                  </button>
-                </div>
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <Receipt className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <p>No payment history</p>
+                <p className="text-sm">Your payment records will appear here</p>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -229,7 +304,10 @@ export const ProfilePage: React.FC = () => {
                 <p className="text-sm text-gray-600">Sign out of your account</p>
               </div>
             </div>
-            <button className="text-red-600 hover:text-red-800 font-medium transition-colors">
+            <button 
+              onClick={handleLogout}
+              className="text-red-600 hover:text-red-800 font-medium transition-colors"
+            >
               Sign Out
             </button>
           </div>
@@ -247,6 +325,17 @@ export const ProfilePage: React.FC = () => {
       default: return <ProfileSection />;
     }
   };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

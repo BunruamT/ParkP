@@ -1,280 +1,459 @@
 import { create } from 'zustand';
-import { ParkingSpot, Booking, User, Vehicle } from '../types';
-import { authService } from '../services/authService';
-import { parkingSpotService } from '../services/parkingSpotService';
-import { bookingService } from '../services/bookingService';
-import { userService } from '../services/userService';
+import { supabase } from '../lib/supabase';
+import type { ParkingSpot, Booking, User, Vehicle } from '../types';
 
 interface AppState {
-  // User state
-  user: User | null;
+  // Auth state
   isAuthenticated: boolean;
-  userType: 'CUSTOMER' | 'OWNER' | 'ADMIN';
-  
-  // Parking spots
+  user: User | null;
+  userType: 'CUSTOMER' | 'OWNER' | 'ADMIN' | null;
+  loading: {
+    auth: boolean;
+    spots: boolean;
+    bookings: boolean;
+  };
+
+  // Data state
   parkingSpots: ParkingSpot[];
-  filteredSpots: ParkingSpot[];
-  
-  // Bookings
   bookings: Booking[];
+  vehicles: Vehicle[];
   
-  // UI state
+  // Search and filters
   searchQuery: string;
   filters: {
     priceRange: [number, number];
     parkingType: string;
     amenities: string[];
   };
-  
-  // Loading states
-  loading: {
-    spots: boolean;
-    bookings: boolean;
-    auth: boolean;
-  };
-  
+
+  // Computed state
+  filteredSpots: ParkingSpot[];
+
   // Actions
-  setUser: (user: User | null) => void;
-  setUserType: (type: 'CUSTOMER' | 'OWNER' | 'ADMIN') => void;
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (data: any) => Promise<boolean>;
+  initializeApp: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  setUserType: (type: 'CUSTOMER' | 'OWNER' | 'ADMIN') => void;
   
-  // Parking spots actions
-  fetchParkingSpots: (filters?: any) => Promise<void>;
-  addParkingSpot: (spot: any) => Promise<void>;
-  updateParkingSpot: (id: string, updates: any) => Promise<void>;
-  deleteParkingSpot: (id: string) => Promise<void>;
-  
-  // Booking actions
-  createBooking: (booking: any) => Promise<Booking>;
+  // Data actions
+  fetchParkingSpots: () => Promise<void>;
   fetchBookings: () => Promise<void>;
-  extendBooking: (id: string) => Promise<void>;
-  cancelBooking: (id: string) => Promise<void>;
-  validateEntry: (code: string) => Promise<any>;
+  fetchVehicles: () => Promise<void>;
   
-  // Search and filter
+  // CRUD operations
+  addParkingSpot: (spotData: Omit<ParkingSpot, 'id' | 'ownerId' | 'rating' | 'reviewCount'>) => Promise<void>;
+  updateParkingSpot: (id: string, updates: Partial<ParkingSpot>) => void;
+  deleteParkingSpot: (id: string) => void;
+  createBooking: (bookingData: Omit<Booking, 'id' | 'qrCode' | 'pin' | 'createdAt'>) => Promise<Booking>;
+  validateEntry: (code: string) => Booking | null;
+  
+  // Search and filter actions
   setSearchQuery: (query: string) => void;
   setFilters: (filters: Partial<AppState['filters']>) => void;
   applyFilters: () => void;
-  
-  // Vehicle management
-  addVehicle: (vehicle: any) => Promise<void>;
-  updateVehicle: (id: string, updates: any) => Promise<void>;
-  deleteVehicle: (id: string) => Promise<void>;
-  
-  // Initialize app
-  initializeApp: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
   // Initial state
-  user: null,
   isAuthenticated: false,
-  userType: 'CUSTOMER',
+  user: null,
+  userType: null,
+  loading: {
+    auth: true,
+    spots: false,
+    bookings: false,
+  },
+  
   parkingSpots: [],
-  filteredSpots: [],
   bookings: [],
+  vehicles: [],
+  
   searchQuery: '',
   filters: {
     priceRange: [0, 500],
     parkingType: 'all',
-    amenities: []
+    amenities: [],
   },
-  loading: {
-    spots: false,
-    bookings: false,
-    auth: false
+  
+  filteredSpots: [],
+
+  // Initialize app
+  initializeApp: async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        // Get user data from database
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (userData && !error) {
+          set({
+            isAuthenticated: true,
+            user: {
+              id: userData.id,
+              name: userData.name,
+              email: userData.email,
+              phone: userData.phone || '',
+              vehicles: []
+            },
+            userType: userData.role,
+            loading: { ...get().loading, auth: false }
+          });
+
+          // Fetch initial data
+          await get().fetchParkingSpots();
+          if (userData.role === 'CUSTOMER') {
+            await get().fetchVehicles();
+            await get().fetchBookings();
+          } else if (userData.role === 'OWNER' || userData.role === 'ADMIN') {
+            await get().fetchBookings();
+          }
+        }
+      } else {
+        set({
+          isAuthenticated: false,
+          user: null,
+          userType: null,
+          loading: { ...get().loading, auth: false }
+        });
+      }
+    } catch (error) {
+      console.error('Error initializing app:', error);
+      set({
+        isAuthenticated: false,
+        user: null,
+        userType: null,
+        loading: { ...get().loading, auth: false }
+      });
+    }
   },
 
-  // User actions
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
-  setUserType: (userType) => set({ userType }),
-  
-  login: async (email, password) => {
+  // Auth actions
+  login: async (email: string, password: string) => {
     try {
-      set(state => ({ loading: { ...state.loading, auth: true } }));
-      const response = await authService.login({ email, password });
-      
-      set({ 
-        user: response.user, 
-        isAuthenticated: true, 
-        userType: response.user.role,
-        loading: { ...get().loading, auth: false }
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
       });
-      
-      return true;
+
+      if (error) throw error;
+
+      if (data.user) {
+        // Get user data from database
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        if (userData && !userError) {
+          set({
+            isAuthenticated: true,
+            user: {
+              id: userData.id,
+              name: userData.name,
+              email: userData.email,
+              phone: userData.phone || '',
+              vehicles: []
+            },
+            userType: userData.role
+          });
+
+          // Fetch initial data
+          await get().fetchParkingSpots();
+          if (userData.role === 'CUSTOMER') {
+            await get().fetchVehicles();
+            await get().fetchBookings();
+          } else if (userData.role === 'OWNER' || userData.role === 'ADMIN') {
+            await get().fetchBookings();
+          }
+        }
+      }
     } catch (error) {
-      set(state => ({ loading: { ...state.loading, auth: false } }));
       console.error('Login error:', error);
-      return false;
+      throw error;
     }
   },
-  
-  register: async (data) => {
-    try {
-      set(state => ({ loading: { ...state.loading, auth: true } }));
-      const response = await authService.register(data);
-      
-      set({ 
-        user: response.user, 
-        isAuthenticated: true, 
-        userType: response.user.role,
-        loading: { ...get().loading, auth: false }
-      });
-      
-      return true;
-    } catch (error) {
-      set(state => ({ loading: { ...state.loading, auth: false } }));
-      console.error('Register error:', error);
-      return false;
-    }
-  },
-  
+
   logout: () => {
-    authService.logout();
-    set({ 
-      user: null, 
-      isAuthenticated: false, 
-      userType: 'CUSTOMER',
-      bookings: [],
+    supabase.auth.signOut();
+    set({
+      isAuthenticated: false,
+      user: null,
+      userType: null,
       parkingSpots: [],
-      filteredSpots: []
+      bookings: [],
+      vehicles: []
     });
   },
 
-  // Parking spots actions
-  fetchParkingSpots: async (filters = {}) => {
+  setUserType: (type) => {
+    set({ userType: type });
+  },
+
+  // Data fetching
+  fetchParkingSpots: async () => {
     try {
       set(state => ({ loading: { ...state.loading, spots: true } }));
-      const response = await parkingSpotService.getParkingSpots(filters);
       
+      const { data, error } = await supabase
+        .from('parking_spots')
+        .select('*')
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const spots: ParkingSpot[] = (data || []).map(spot => ({
+        id: spot.id,
+        name: spot.name,
+        description: spot.description || '',
+        address: spot.address,
+        price: spot.price,
+        priceType: spot.price_type as 'hour' | 'day' | 'month',
+        totalSlots: spot.total_slots,
+        availableSlots: spot.available_slots,
+        rating: spot.rating,
+        reviewCount: spot.review_count,
+        images: spot.images || [],
+        amenities: spot.amenities || [],
+        openingHours: spot.opening_hours,
+        phone: spot.phone,
+        lat: spot.latitude,
+        lng: spot.longitude,
+        ownerId: spot.owner_id
+      }));
+
       set({ 
-        parkingSpots: response.spots,
-        filteredSpots: response.spots,
+        parkingSpots: spots,
         loading: { ...get().loading, spots: false }
       });
+      
+      // Update filtered spots
+      get().applyFilters();
     } catch (error) {
+      console.error('Error fetching parking spots:', error);
       set(state => ({ loading: { ...state.loading, spots: false } }));
-      console.error('Fetch parking spots error:', error);
-    }
-  },
-
-  addParkingSpot: async (spotData) => {
-    try {
-      const response = await parkingSpotService.createParkingSpot(spotData);
-      const newSpot = response.spot;
-      
-      set(state => ({
-        parkingSpots: [...state.parkingSpots, newSpot],
-        filteredSpots: [...state.filteredSpots, newSpot]
-      }));
-    } catch (error) {
-      console.error('Add parking spot error:', error);
-      throw error;
-    }
-  },
-
-  updateParkingSpot: async (id, updates) => {
-    try {
-      const response = await parkingSpotService.updateParkingSpot(id, updates);
-      const updatedSpot = response.spot;
-      
-      set(state => ({
-        parkingSpots: state.parkingSpots.map(spot => 
-          spot.id === id ? updatedSpot : spot
-        ),
-        filteredSpots: state.filteredSpots.map(spot => 
-          spot.id === id ? updatedSpot : spot
-        )
-      }));
-    } catch (error) {
-      console.error('Update parking spot error:', error);
-      throw error;
-    }
-  },
-
-  deleteParkingSpot: async (id) => {
-    try {
-      await parkingSpotService.deleteParkingSpot(id);
-      
-      set(state => ({
-        parkingSpots: state.parkingSpots.filter(spot => spot.id !== id),
-        filteredSpots: state.filteredSpots.filter(spot => spot.id !== id)
-      }));
-    } catch (error) {
-      console.error('Delete parking spot error:', error);
-      throw error;
-    }
-  },
-
-  // Booking actions
-  createBooking: async (bookingData) => {
-    try {
-      const response = await bookingService.createBooking(bookingData);
-      const newBooking = response.booking;
-      
-      set(state => ({
-        bookings: [...state.bookings, newBooking]
-      }));
-      
-      return newBooking;
-    } catch (error) {
-      console.error('Create booking error:', error);
-      throw error;
     }
   },
 
   fetchBookings: async () => {
+    const { user, userType } = get();
+    if (!user) return;
+
     try {
       set(state => ({ loading: { ...state.loading, bookings: true } }));
-      const response = await bookingService.getMyBookings();
       
+      let query = supabase
+        .from('bookings')
+        .select(`
+          *,
+          parking_spots!inner(name, address),
+          vehicles!inner(make, model, license_plate)
+        `);
+
+      // Filter based on user type
+      if (userType === 'CUSTOMER') {
+        query = query.eq('user_id', user.id);
+      } else if (userType === 'OWNER' || userType === 'ADMIN') {
+        // For owners, get bookings for their parking spots
+        const { data: ownerSpots } = await supabase
+          .from('parking_spots')
+          .select('id')
+          .eq('owner_id', user.id);
+        
+        if (ownerSpots && ownerSpots.length > 0) {
+          const spotIds = ownerSpots.map(spot => spot.id);
+          query = query.in('spot_id', spotIds);
+        } else {
+          // No spots owned, return empty array
+          set({ 
+            bookings: [],
+            loading: { ...get().loading, bookings: false }
+          });
+          return;
+        }
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const bookings: Booking[] = (data || []).map(booking => ({
+        id: booking.id,
+        spotId: booking.spot_id,
+        userId: booking.user_id,
+        vehicleId: booking.vehicle_id,
+        startTime: booking.start_time,
+        endTime: booking.end_time,
+        totalCost: booking.total_cost,
+        status: booking.status.toLowerCase() as 'pending' | 'active' | 'completed' | 'cancelled',
+        qrCode: booking.qr_code,
+        pin: booking.pin,
+        createdAt: booking.created_at
+      }));
+
       set({ 
-        bookings: response.bookings,
+        bookings,
         loading: { ...get().loading, bookings: false }
       });
     } catch (error) {
+      console.error('Error fetching bookings:', error);
       set(state => ({ loading: { ...state.loading, bookings: false } }));
-      console.error('Fetch bookings error:', error);
     }
   },
 
-  extendBooking: async (id) => {
+  fetchVehicles: async () => {
+    const { user } = get();
+    if (!user) return;
+
     try {
-      await bookingService.extendBooking(id);
-      // Refresh bookings
-      await get().fetchBookings();
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const vehicles: Vehicle[] = (data || []).map(vehicle => ({
+        id: vehicle.id,
+        make: vehicle.make,
+        model: vehicle.model,
+        licensePlate: vehicle.license_plate,
+        color: vehicle.color
+      }));
+
+      set(state => ({
+        user: state.user ? { ...state.user, vehicles } : null,
+        vehicles
+      }));
     } catch (error) {
-      console.error('Extend booking error:', error);
+      console.error('Error fetching vehicles:', error);
+    }
+  },
+
+  // CRUD operations
+  addParkingSpot: async (spotData) => {
+    const { user } = get();
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('parking_spots')
+        .insert({
+          name: spotData.name,
+          description: spotData.description,
+          address: spotData.address,
+          latitude: spotData.lat,
+          longitude: spotData.lng,
+          price: spotData.price,
+          price_type: spotData.priceType,
+          total_slots: spotData.totalSlots,
+          available_slots: spotData.totalSlots,
+          amenities: spotData.amenities,
+          images: spotData.images,
+          opening_hours: spotData.openingHours,
+          phone: spotData.phone,
+          owner_id: user.id
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Refresh parking spots
+      await get().fetchParkingSpots();
+    } catch (error) {
+      console.error('Error adding parking spot:', error);
       throw error;
     }
   },
 
-  cancelBooking: async (id) => {
+  updateParkingSpot: (id, updates) => {
+    set(state => ({
+      parkingSpots: state.parkingSpots.map(spot =>
+        spot.id === id ? { ...spot, ...updates } : spot
+      )
+    }));
+    get().applyFilters();
+  },
+
+  deleteParkingSpot: (id) => {
+    set(state => ({
+      parkingSpots: state.parkingSpots.filter(spot => spot.id !== id)
+    }));
+    get().applyFilters();
+  },
+
+  createBooking: async (bookingData) => {
+    const { user } = get();
+    if (!user) throw new Error('User not authenticated');
+
     try {
-      await bookingService.cancelBooking(id);
-      // Refresh bookings
-      await get().fetchBookings();
+      // Generate QR code and PIN
+      const qrCode = `QR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const pin = Math.floor(1000 + Math.random() * 9000).toString();
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .insert({
+          spot_id: bookingData.spotId,
+          user_id: user.id,
+          vehicle_id: bookingData.vehicleId,
+          start_time: bookingData.startTime,
+          end_time: bookingData.endTime,
+          reserved_end_time: bookingData.endTime,
+          total_cost: bookingData.totalCost,
+          status: 'PENDING',
+          qr_code: qrCode,
+          pin: pin
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const newBooking: Booking = {
+        id: data.id,
+        spotId: data.spot_id,
+        userId: data.user_id,
+        vehicleId: data.vehicle_id,
+        startTime: data.start_time,
+        endTime: data.end_time,
+        totalCost: data.total_cost,
+        status: data.status.toLowerCase() as 'pending',
+        qrCode: data.qr_code,
+        pin: data.pin,
+        createdAt: data.created_at
+      };
+
+      // Update local state
+      set(state => ({
+        bookings: [newBooking, ...state.bookings]
+      }));
+
+      return newBooking;
     } catch (error) {
-      console.error('Cancel booking error:', error);
+      console.error('Error creating booking:', error);
       throw error;
     }
   },
 
-  validateEntry: async (code) => {
-    try {
-      const response = await bookingService.validateEntry(code);
-      return response;
-    } catch (error) {
-      console.error('Validate entry error:', error);
-      throw error;
-    }
+  validateEntry: (code) => {
+    const { bookings } = get();
+    return bookings.find(booking => 
+      (booking.qrCode === code || booking.pin === code) &&
+      (booking.status === 'pending' || booking.status === 'active')
+    ) || null;
   },
 
-  // Search and filter
-  setSearchQuery: (searchQuery) => {
-    set({ searchQuery });
+  // Search and filter actions
+  setSearchQuery: (query) => {
+    set({ searchQuery: query });
     get().applyFilters();
   },
 
@@ -285,11 +464,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().applyFilters();
   },
 
+  // Helper function to apply filters
   applyFilters: () => {
     const { parkingSpots, searchQuery, filters } = get();
     
     let filtered = parkingSpots.filter(spot => {
-      // Search query filter
+      // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         if (!spot.name.toLowerCase().includes(query) && 
@@ -297,24 +477,25 @@ export const useAppStore = create<AppState>((set, get) => ({
           return false;
         }
       }
-      
-      // Price range filter
-      const hourlyPrice = spot.priceType === 'hour' ? spot.price : 
-                         spot.priceType === 'day' ? spot.price / 24 : 
-                         spot.price / (24 * 30);
-      
-      if (hourlyPrice < filters.priceRange[0] || hourlyPrice > filters.priceRange[1]) {
+
+      // Price filter
+      if (spot.price > filters.priceRange[1]) {
         return false;
       }
-      
+
       // Parking type filter
       if (filters.parkingType !== 'all') {
-        const hasType = spot.amenities.some(amenity => 
-          amenity.toLowerCase().includes(filters.parkingType.toLowerCase())
-        );
+        const hasType = spot.amenities.some(amenity => {
+          switch (filters.parkingType) {
+            case 'covered': return amenity.toLowerCase().includes('covered');
+            case 'valet': return amenity.toLowerCase().includes('valet');
+            case 'security': return amenity.toLowerCase().includes('security');
+            default: return true;
+          }
+        });
         if (!hasType) return false;
       }
-      
+
       // Amenities filter
       if (filters.amenities.length > 0) {
         const hasAllAmenities = filters.amenities.every(amenity =>
@@ -322,74 +503,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         if (!hasAllAmenities) return false;
       }
-      
+
       return true;
     });
-    
+
     set({ filteredSpots: filtered });
-  },
-
-  // Vehicle management
-  addVehicle: async (vehicleData) => {
-    try {
-      const response = await userService.addVehicle(vehicleData);
-      // Refresh user data to get updated vehicles
-      const updatedUser = await userService.getProfile();
-      set({ user: updatedUser });
-    } catch (error) {
-      console.error('Add vehicle error:', error);
-      throw error;
-    }
-  },
-
-  updateVehicle: async (id, updates) => {
-    try {
-      await userService.updateVehicle(id, updates);
-      // Refresh user data to get updated vehicles
-      const updatedUser = await userService.getProfile();
-      set({ user: updatedUser });
-    } catch (error) {
-      console.error('Update vehicle error:', error);
-      throw error;
-    }
-  },
-
-  deleteVehicle: async (id) => {
-    try {
-      await userService.deleteVehicle(id);
-      // Refresh user data to get updated vehicles
-      const updatedUser = await userService.getProfile();
-      set({ user: updatedUser });
-    } catch (error) {
-      console.error('Delete vehicle error:', error);
-      throw error;
-    }
-  },
-
-  // Initialize app
-  initializeApp: async () => {
-    try {
-      if (authService.isAuthenticated()) {
-        const user = await authService.getCurrentUser();
-        set({ 
-          user, 
-          isAuthenticated: true, 
-          userType: user.role 
-        });
-        
-        // Fetch initial data
-        await get().fetchParkingSpots();
-        await get().fetchBookings();
-      }
-    } catch (error) {
-      console.error('Initialize app error:', error);
-      // If token is invalid, logout
-      authService.logout();
-      set({ 
-        user: null, 
-        isAuthenticated: false, 
-        userType: 'CUSTOMER' 
-      });
-    }
   }
 }));
