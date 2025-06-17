@@ -1,507 +1,232 @@
+
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { 
-  Calendar, 
-  Clock, 
-  MapPin, 
-  QrCode, 
-  Car, 
-  Star,
-  Navigation,
-  MoreHorizontal,
-  AlertCircle,
-  Copy,
-  Download,
-  Plus,
-  Minus,
-  CheckCircle,
-  XCircle
-} from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Calendar, Clock, MapPin, Car, QrCode, Phone } from 'lucide-react';
 import { QRCodeGenerator } from '../components/QRCodeGenerator';
+import { PaymentSlipUpload } from '../components/PaymentSlipUpload';
 import { RatingReviewModal } from '../components/RatingReviewModal';
+import { database } from '../data/database';
+import { useAuth } from '../context/AuthContext';
+import { Booking, ParkingSpot, Vehicle } from '../types';
 
 export const BookingsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'current' | 'history'>('current');
-  const [showQRModal, setShowQRModal] = useState<string | null>(null);
-  const [showExtendModal, setShowExtendModal] = useState<string | null>(null);
-  const [showReviewModal, setShowReviewModal] = useState<string | null>(null);
-  const [extendHours, setExtendHours] = useState(1);
-  
-  const { bookings, parkingSpots, fetchBookings, loading } = useAppStore();
+  const { user } = useAuth();
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [spots, setSpots] = useState<ParkingSpot[]>([]);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [showPaymentUpload, setShowPaymentUpload] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [paymentSlip, setPaymentSlip] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchBookings();
-  }, [fetchBookings]);
-  
-  const currentBookings = bookings.filter(b => 
-    b.status === 'pending' || b.status === 'active'
-  );
-  const pastBookings = bookings.filter(b => 
-    b.status === 'completed' || b.status === 'cancelled'
-  );
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        if (!user) {
+          console.error("User not authenticated.");
+          return;
+        }
 
-  const getBookingStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-green-100 text-green-800';
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'completed': return 'bg-gray-100 text-gray-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+        const userBookings = await database.getBookingsByUserId(user.id);
+        setBookings(userBookings);
 
-  const formatDateTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return {
-      date: date.toLocaleDateString(),
-      time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const userVehicles = await database.getVehiclesByUserId(user.id);
+        setVehicles(userVehicles);
+
+        const allSpots = await database.getParkingSpots();
+        setSpots(allSpots);
+      } catch (error) {
+        console.error("Failed to load data:", error);
+      } finally {
+        setIsLoading(false);
+      }
     };
-  };
 
-  const copyToClipboard = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    alert(`${type} copied to clipboard!`);
-  };
-
-  const handleExtendBooking = (bookingId: string) => {
-    console.log(`Extending booking ${bookingId} by ${extendHours} hours`);
-    alert(`Booking extended by ${extendHours} hour(s) successfully!`);
-    setShowExtendModal(null);
-    setExtendHours(1);
-  };
-
-  const handleCancelBooking = (bookingId: string) => {
-    if (confirm('Are you sure you want to cancel this booking?')) {
-      console.log(`Cancelling booking ${bookingId}`);
-      alert('Booking cancelled successfully!');
-    }
-  };
-
-  const handleSubmitReview = async (rating: number, review: string, photos: string[]) => {
-    const booking = bookings.find(b => b.id === showReviewModal);
-    const spot = parkingSpots.find(s => s.id === booking?.spotId);
-    
-    console.log('Submitting review:', {
-      bookingId: showReviewModal,
-      spotId: booking?.spotId,
-      spotName: spot?.name,
-      rating,
-      review,
-      photos,
-      timestamp: new Date().toISOString()
-    });
-
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    alert(`Thank you for your ${rating}-star review of ${spot?.name}!`);
-    setShowReviewModal(null);
-  };
+    loadData();
+  }, [user]);
 
   const getSpotName = (spotId: string) => {
-    const spot = parkingSpots.find(s => s.id === spotId);
-    return spot?.name || 'Unknown Parking Spot';
+    const spot = spots.find(spot => spot.id === spotId);
+    return spot ? spot.name : 'Unknown Spot';
   };
 
-  const getSpotAddress = (spotId: string) => {
-    const spot = parkingSpots.find(s => s.id === spotId);
-    return spot?.address || 'Unknown Address';
+  const handleBookingClick = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setShowQRCode(true);
   };
 
-  const BookingCard: React.FC<{ booking: any; showActions?: boolean }> = ({ 
-    booking, 
-    showActions = false 
-  }) => {
-    const spotName = getSpotName(booking.spotId);
-    const spotAddress = getSpotAddress(booking.spotId);
-    const startDateTime = formatDateTime(booking.startTime);
-    const endDateTime = formatDateTime(booking.endTime);
-
-    return (
-      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-900 mb-1">
-              {spotName}
-            </h3>
-            <div className="flex items-center space-x-1 text-gray-600 mb-2">
-              <MapPin className="h-4 w-4" />
-              <span className="text-sm">{spotAddress}</span>
-            </div>
-            <div className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-              getBookingStatusColor(booking.status)
-            }`}>
-              {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-lg font-bold text-gray-900">
-              ${booking.totalCost}
-            </div>
-            <div className="text-sm text-gray-500">Total</div>
-          </div>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-4 mb-4">
-          <div className="flex items-center space-x-2 text-sm text-gray-600">
-            <Calendar className="h-4 w-4" />
-            <span>{startDateTime.date}</span>
-          </div>
-          <div className="flex items-center space-x-2 text-sm text-gray-600">
-            <Clock className="h-4 w-4" />
-            <span>{startDateTime.time} - {endDateTime.time}</span>
-          </div>
-        </div>
-
-        {(booking.status === 'active' || booking.status === 'pending') && (
-          <div className="bg-blue-50 rounded-lg p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center space-x-2 text-blue-900 font-semibold">
-                <QrCode className="h-5 w-5" />
-                <span>Entry Access</span>
-              </div>
-              <button
-                onClick={() => setShowQRModal(booking.id)}
-                className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-              >
-                Show QR
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-600 mb-1">PIN Code</div>
-                <div className="font-mono text-lg font-bold text-blue-900">{booking.pin}</div>
-                <button
-                  onClick={() => copyToClipboard(booking.pin, 'PIN')}
-                  className="text-xs text-blue-600 hover:text-blue-800 mt-1"
-                >
-                  Copy PIN
-                </button>
-              </div>
-              <div className="bg-white rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-600 mb-1">QR Code</div>
-                <div className="text-sm font-medium text-blue-900">Available</div>
-                <button
-                  onClick={() => copyToClipboard(booking.qrCode, 'QR Code')}
-                  className="text-xs text-blue-600 hover:text-blue-800 mt-1"
-                >
-                  Copy Code
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showActions && (
-          <div className="flex flex-wrap gap-2">
-            {booking.status === 'active' && (
-              <>
-                <button className="flex items-center space-x-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-                  <Navigation className="h-4 w-4" />
-                  <span>Navigate</span>
-                </button>
-                <button
-                  onClick={() => setShowExtendModal(booking.id)}
-                  className="flex items-center space-x-1 border border-green-200 text-green-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-50 transition-colors"
-                >
-                  <Clock className="h-4 w-4" />
-                  <span>Extend Time</span>
-                </button>
-                <button
-                  onClick={() => setShowQRModal(booking.id)}
-                  className="flex items-center space-x-1 border border-blue-200 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
-                >
-                  <QrCode className="h-4 w-4" />
-                  <span>Show QR</span>
-                </button>
-              </>
-            )}
-            {booking.status === 'pending' && (
-              <>
-                <button
-                  onClick={() => setShowQRModal(booking.id)}
-                  className="flex items-center space-x-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  <QrCode className="h-4 w-4" />
-                  <span>Show QR</span>
-                </button>
-                <button
-                  onClick={() => handleCancelBooking(booking.id)}
-                  className="flex items-center space-x-1 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors"
-                >
-                  <XCircle className="h-4 w-4" />
-                  <span>Cancel</span>
-                </button>
-              </>
-            )}
-            {booking.status === 'completed' && (
-              <>
-                <Link
-                  to={`/book/${booking.spotId}`}
-                  className="flex items-center space-x-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  <Car className="h-4 w-4" />
-                  <span>Book Again</span>
-                </Link>
-                <button 
-                  onClick={() => setShowReviewModal(booking.id)}
-                  className="flex items-center space-x-1 border border-yellow-200 text-yellow-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-yellow-50 transition-colors"
-                >
-                  <Star className="h-4 w-4" />
-                  <span>Rate & Review</span>
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  const handlePaymentUploadClick = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setShowPaymentUpload(true);
   };
 
-  if (loading.bookings) {
+  const handleRatingClick = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setShowRatingModal(true);
+  };
+
+  const handlePaymentSlipUpload = (file: File | null) => {
+    if (file) {
+      // Simulate upload and set the state
+      setPaymentSlip(URL.createObjectURL(file));
+      setShowPaymentUpload(false);
+    }
+  };
+
+  const handleRatingSubmit = (rating: number, reviewText: string) => {
+    // Implement the submission logic here
+    console.log('Rating:', rating, 'Review:', reviewText);
+    setShowRatingModal(false);
+  };
+
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading bookings...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            My Bookings
-          </h1>
-          <p className="text-gray-600">
-            Manage your parking reservations and history
-          </p>
-        </div>
+    <div className="container py-8">
+      <Card>
+        <CardHeader>
+          <CardTitle>My Bookings</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {bookings.length > 0 ? (
+            <div className="grid gap-4">
+              {bookings.map((booking) => {
+                const spot = spots.find(s => s.id === booking.spotId);
+                const vehicle = vehicles.find(v => v.id === booking.vehicleId);
 
-        {/* Tabs */}
-        <div className="bg-white rounded-xl shadow-md mb-6">
-          <div className="flex border-b border-gray-200">
-            <button
-              onClick={() => setActiveTab('current')}
-              className={`flex-1 py-4 px-6 text-center font-medium transition-colors ${
-                activeTab === 'current'
-                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Current & Upcoming ({currentBookings.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`flex-1 py-4 px-6 text-center font-medium transition-colors ${
-                activeTab === 'history'
-                  ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              History ({pastBookings.length})
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="space-y-6">
-          {activeTab === 'current' ? (
-            currentBookings.length > 0 ? (
-              currentBookings.map((booking) => (
-                <BookingCard 
-                  key={booking.id} 
-                  booking={booking} 
-                  showActions={true} 
-                />
-              ))
-            ) : (
-              <div className="bg-white rounded-xl shadow-md p-8 text-center">
-                <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  No Current Bookings
-                </h3>
-                <p className="text-gray-600 mb-4">
-                  You don't have any active or upcoming reservations.
-                </p>
-                <Link
-                  to="/"
-                  className="inline-flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-                >
-                  <Car className="h-5 w-5" />
-                  <span>Find Parking</span>
-                </Link>
-              </div>
-            )
-          ) : (
-            pastBookings.length > 0 ? (
-              pastBookings.map((booking) => (
-                <BookingCard 
-                  key={booking.id} 
-                  booking={booking} 
-                  showActions={true} 
-                />
-              ))
-            ) : (
-              <div className="bg-white rounded-xl shadow-md p-8 text-center">
-                <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  No Booking History
-                </h3>
-                <p className="text-gray-600">
-                  Your completed bookings will appear here.
-                </p>
-              </div>
-            )
-          )}
-        </div>
-
-        {/* QR Code Modal */}
-        {showQRModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-900">Entry QR Code</h3>
-                  <button
-                    onClick={() => setShowQRModal(null)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <XCircle className="h-5 w-5 text-gray-500" />
-                  </button>
-                </div>
-
-                <div className="text-center">
-                  <QRCodeGenerator 
-                    value={bookings.find(b => b.id === showQRModal)?.qrCode || ''} 
-                    size={200}
-                    className="mb-4"
-                  />
-                  
-                  <div className="bg-blue-50 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-blue-700 mb-2">Backup PIN Code</div>
-                    <div className="text-3xl font-bold font-mono text-blue-900 mb-2">
-                      {bookings.find(b => b.id === showQRModal)?.pin}
-                    </div>
-                    <div className="text-xs text-blue-600">Use if QR scanner doesn't work</div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => copyToClipboard(bookings.find(b => b.id === showQRModal)?.qrCode || '', 'QR Code')}
-                      className="flex-1 flex items-center justify-center space-x-1 border border-blue-200 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
-                    >
-                      <Copy className="h-4 w-4" />
-                      <span>Copy Code</span>
-                    </button>
-                    <button
-                      onClick={() => alert('QR Code download functionality would be implemented here')}
-                      className="flex-1 flex items-center justify-center space-x-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Save QR</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Extend Time Modal */}
-        {showExtendModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-900">Extend Parking Time</h3>
-                  <button
-                    onClick={() => setShowExtendModal(null)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <XCircle className="h-5 w-5 text-gray-500" />
-                  </button>
-                </div>
-
-                <div className="mb-6">
-                  <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                    <div className="text-sm text-gray-600 mb-1">Current booking ends at:</div>
-                    <div className="font-semibold text-gray-900">
-                      {formatDateTime(bookings.find(b => b.id === showExtendModal)?.endTime || '').time}
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Extend by how many hours?
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      <button
-                        onClick={() => setExtendHours(Math.max(1, extendHours - 1))}
-                        className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                      <div className="flex-1 text-center">
-                        <div className="text-2xl font-bold text-gray-900">{extendHours}</div>
-                        <div className="text-sm text-gray-600">hour{extendHours !== 1 ? 's' : ''}</div>
-                      </div>
-                      <button
-                        onClick={() => setExtendHours(extendHours + 1)}
-                        className="p-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-green-50 rounded-lg p-4">
+                return (
+                  <div key={booking.id} className="border rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <div className="text-sm text-green-700">Extension Cost</div>
-                        <div className="text-sm text-green-600">
-                          {extendHours} hour{extendHours !== 1 ? 's' : ''} × $25/hour
+                        <h3 className="text-lg font-semibold">{getSpotName(booking.spotId)}</h3>
+                        <div className="text-sm text-gray-500">
+                          <MapPin className="h-4 w-4 inline-block mr-1" />
+                          {spot?.address}
                         </div>
                       </div>
-                      <div className="text-xl font-bold text-green-900">
-                        ${extendHours * 25}
+                      <Badge variant="secondary">{booking.status}</Badge>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <Calendar className="h-4 w-4 inline-block mr-1" />
+                        {new Date(booking.startTime).toLocaleDateString()}
+                      </div>
+                      <div>
+                        <Clock className="h-4 w-4 inline-block mr-1" />
+                        {new Date(booking.startTime).toLocaleTimeString()} - {new Date(booking.endTime).toLocaleTimeString()}
+                      </div>
+                      <div>
+                        <Car className="h-4 w-4 inline-block mr-1" />
+                        {vehicle ? `${vehicle.make} ${vehicle.model}` : 'Vehicle info not available'}
+                      </div>
+                      <div>
+                        <Phone className="h-4 w-4 inline-block mr-1" />
+                        {spot?.phone || 'N/A'}
                       </div>
                     </div>
+                    <div className="mt-4 flex justify-end space-x-2">
+                      <Button size="sm" onClick={() => handleBookingClick(booking)}>
+                        <QrCode className="h-4 w-4 mr-2" />
+                        View QR Code
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handlePaymentUploadClick(booking)}>
+                        Upload Payment
+                      </Button>
+                      <Button size="sm" onClick={() => handleRatingClick(booking)}>
+                        Rate & Review
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                No bookings yet
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Book your parking spot now.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowExtendModal(null)}
-                    className="flex-1 border border-gray-200 py-3 px-4 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleExtendBooking(showExtendModal)}
-                    className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors"
-                  >
-                    Extend Parking
-                  </button>
-                </div>
+      {/* QR Code Modal */}
+      {showQRCode && selectedBooking && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3 text-center">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                Booking QR Code
+              </h3>
+              <div className="mt-2">
+                <QRCodeGenerator value={selectedBooking.qrCode} />
+                <p>Booking ID: {selectedBooking.id}</p>
+                <p>PIN: {selectedBooking.pin}</p>
+              </div>
+              <div className="items-center px-4 py-3">
+                <Button onClick={() => setShowQRCode(false)} className="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md width-full shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                  Close
+                </Button>
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Rating & Review Modal */}
-        <RatingReviewModal
-          isOpen={showReviewModal !== null}
-          onClose={() => setShowReviewModal(null)}
-          spotName={getSpotName(bookings.find(b => b.id === showReviewModal)?.spotId || '')}
-          bookingId={showReviewModal || ''}
-          onSubmit={handleSubmitReview}
-        />
-      </div>
+      {/* Payment Upload Modal */}
+      {showPaymentUpload && selectedBooking && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3 text-center">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                Upload Payment Slip
+              </h3>
+              <div className="mt-2">
+                <PaymentSlipUpload onUpload={handlePaymentSlipUpload} />
+                {paymentSlip && (
+                  <img src={paymentSlip} alt="Payment Slip" className="mt-4 max-h-40 object-contain" />
+                )}
+              </div>
+              <div className="items-center px-4 py-3">
+                <Button onClick={() => setShowPaymentUpload(false)} className="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md width-full shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rating and Review Modal */}
+      {showRatingModal && selectedBooking && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3 text-center">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                Rate and Review
+              </h3>
+              <div className="mt-2">
+                <RatingReviewModal onSubmit={handleRatingSubmit} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

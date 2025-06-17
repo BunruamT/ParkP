@@ -1,4 +1,5 @@
 import React from 'react';
+import QRCode from 'qrcode';
 
 interface QRCodeGeneratorProps {
   value: string;
@@ -11,10 +12,41 @@ export const QRCodeGenerator: React.FC<QRCodeGeneratorProps> = ({
   size = 200, 
   className = "" 
 }) => {
-  // In a real app, you'd use a QR code library like 'qrcode' or 'react-qr-code'
-  // For this demo, we'll create a visual representation
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}`;
-  
+  const [qrCodeUrl, setQrCodeUrl] = React.useState<string>('');
+
+  React.useEffect(() => {
+    const generateQR = async () => {
+      try {
+        const url = await QRCode.toDataURL(value, {
+          width: size,
+          margin: 2,
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF'
+          }
+        });
+        setQrCodeUrl(url);
+      } catch (error) {
+        console.error('Error generating QR code:', error);
+      }
+    };
+
+    if (value) {
+      generateQR();
+    }
+  }, [value, size]);
+
+  if (!qrCodeUrl) {
+    return (
+      <div 
+        className={`flex items-center justify-center bg-gray-100 rounded-lg ${className}`}
+        style={{ width: size + 32, height: size + 32 }}
+      >
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex flex-col items-center ${className}`}>
       <div 

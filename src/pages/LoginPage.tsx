@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Eye, EyeOff, Mail, Lock, User, Building2, Car } from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
+import { useAuth } from '../context/AuthContext';
+import { database } from '../data/database';
 
 export const LoginPage: React.FC = () => {
   const [mode, setMode] = useState<'login' | 'customer-register' | 'owner-register'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -16,46 +18,64 @@ export const LoginPage: React.FC = () => {
     businessName: '',
     businessAddress: ''
   });
-  
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { login, setUserType } = useAppStore();
+  const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (mode !== 'login' && formData.password !== formData.confirmPassword) {
-      alert('Passwords do not match');
-      return;
-    }
-
-    if (mode !== 'login' && (!formData.name || !formData.email || !formData.password)) {
-      alert('Please fill in all required fields');
-      return;
-    }
+    setError('');
+    setIsLoading(true);
 
     try {
-      if (mode === 'owner-register') {
-        setUserType('admin');
-        await login(formData.email, formData.password);
-        navigate('/admin');
-      } else if (mode === 'login') {
-        // Determine user type based on email or use demo credentials
-        if (formData.email.includes('owner') || formData.email.includes('admin') || formData.email.includes('property')) {
-          setUserType('admin');
-          await login(formData.email, formData.password);
-          navigate('/admin');
-        } else {
-          setUserType('customer');
-          await login(formData.email, formData.password);
+      if (mode === 'login') {
+        const success = await login(formData.email, formData.password);
+        if (success) {
+          // Store remember me preference
+          if (rememberMe) {
+            localStorage.setItem('parkpass_remember', 'true');
+          }
+          // Navigation will be handled by the auth context and route protection
           navigate('/');
+        } else {
+          setError('Invalid email or password');
         }
       } else {
-        setUserType('customer');
-        await login(formData.email, formData.password);
-        navigate('/');
+        // Registration
+        if (formData.password !== formData.confirmPassword) {
+          setError('Passwords do not match');
+          setIsLoading(false);
+          return;
+        }
+
+        if (formData.password.length < 6) {
+          setError('Password must be at least 6 characters long');
+          setIsLoading(false);
+          return;
+        }
+
+        const userData = {
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          phone: formData.phone,
+          userType: mode === 'owner-register' ? 'owner' as const : 'customer' as const,
+          vehicles: []
+        };
+
+        await database.createUser(userData);
+        
+        // Auto-login after registration
+        const success = await login(formData.email, formData.password);
+        if (success) {
+          navigate('/');
+        }
       }
     } catch (error) {
-      alert('Login failed. Please try again.');
+      setError('An error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -76,20 +96,12 @@ export const LoginPage: React.FC = () => {
       businessName: '',
       businessAddress: ''
     });
+    setError('');
   };
 
   const switchMode = (newMode: typeof mode) => {
     setMode(newMode);
     resetForm();
-  };
-
-  const handleDemoLogin = (userType: 'customer' | 'admin') => {
-    const email = userType === 'admin' ? 'owner@demo.com' : 'driver@demo.com';
-    setFormData(prev => ({ ...prev, email, password: 'demo123' }));
-    setUserType(userType);
-    login(email, 'demo123').then(() => {
-      navigate(userType === 'admin' ? '/admin' : '/');
-    });
   };
 
   return (
@@ -176,6 +188,12 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
 
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-700 text-sm">{error}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Name Field (Registration only) */}
             {mode !== 'login' && (
@@ -191,27 +209,6 @@ export const LoginPage: React.FC = () => {
                     value={formData.name}
                     onChange={handleInputChange}
                     placeholder="Enter your full name"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all duration-200 hover:border-gray-300"
-                    required
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Business Name (Owner registration only) */}
-            {mode === 'owner-register' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Business Name
-                </label>
-                <div className="relative">
-                  <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    name="businessName"
-                    value={formData.businessName}
-                    onChange={handleInputChange}
-                    placeholder="Your business or property name"
                     className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all duration-200 hover:border-gray-300"
                     required
                   />
@@ -256,24 +253,6 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            {/* Business Address (Owner registration only) */}
-            {mode === 'owner-register' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Business Address
-                </label>
-                <input
-                  type="text"
-                  name="businessAddress"
-                  value={formData.businessAddress}
-                  onChange={handleInputChange}
-                  placeholder="Primary business location"
-                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all duration-200 hover:border-gray-300"
-                  required
-                />
-              </div>
-            )}
-
             {/* Password Field */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -300,7 +279,7 @@ export const LoginPage: React.FC = () => {
               </div>
               {mode !== 'login' && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Must be at least 8 characters with letters and numbers
+                  Must be at least 6 characters
                 </p>
               )}
             </div>
@@ -333,51 +312,45 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            {/* Remember Me / Forgot Password (Login only) */}
+            {/* Remember Me (Login only) */}
             {mode === 'login' && (
               <div className="flex items-center justify-between">
                 <label className="flex items-center">
-                  <input 
-                    type="checkbox" 
-                    className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" 
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                   />
-                  <span className="ml-2 text-sm text-gray-600">Remember me</span>
+                  <span className="ml-2 text-sm text-gray-700">Remember me</span>
                 </label>
-                <button type="button" className="text-sm text-blue-600 hover:text-blue-800 transition-colors font-medium">
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                >
                   Forgot password?
                 </button>
-              </div>
-            )}
-
-            {/* Terms and Conditions (Registration only) */}
-            {mode !== 'login' && (
-              <div className="flex items-start space-x-3">
-                <input 
-                  type="checkbox" 
-                  required 
-                  className="mt-1 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50" 
-                />
-                <span className="text-sm text-gray-600 leading-relaxed">
-                  I agree to the{' '}
-                  <button type="button" className="text-blue-600 hover:text-blue-800 transition-colors font-medium">
-                    Terms of Service
-                  </button>{' '}
-                  and{' '}
-                  <button type="button" className="text-blue-600 hover:text-blue-800 transition-colors font-medium">
-                    Privacy Policy
-                  </button>
-                </span>
               </div>
             )}
 
             {/* Submit Button */}
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              disabled={isLoading}
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
-              {mode === 'login' && 'Sign In'}
-              {mode === 'customer-register' && 'Create Driver Account'}
-              {mode === 'owner-register' && 'Create Owner Account'}
+              {isLoading ? (
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Please wait...</span>
+                </div>
+              ) : (
+                <>
+                  {mode === 'login' && 'Sign In'}
+                  {mode === 'customer-register' && 'Create Driver Account'}
+                  {mode === 'owner-register' && 'Create Owner Account'}
+                </>
+              )}
             </button>
           </form>
 
@@ -413,87 +386,24 @@ export const LoginPage: React.FC = () => {
             )}
           </div>
 
-          {/* Social Login (Optional) */}
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
+          {/* Demo Credentials */}
+          <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+            <h4 className="font-semibold text-blue-900 mb-3 flex items-center">
+              <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+              Demo Credentials
+            </h4>
+            <div className="text-sm text-blue-800 space-y-2">
+              <div className="flex justify-between items-center">
+                <span><strong>Driver:</strong> driver@demo.com</span>
+                <span className="font-mono text-xs bg-blue-100 px-2 py-1 rounded">demo123</span>
               </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-white text-gray-500">Or continue with</span>
+              <div className="flex justify-between items-center">
+                <span><strong>Owner:</strong> owner@demo.com</span>
+                <span className="font-mono text-xs bg-blue-100 px-2 py-1 rounded">demo123</span>
               </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button className="flex items-center justify-center px-4 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all duration-200 hover:border-gray-300 hover:shadow-sm">
-                <span className="text-sm font-medium text-gray-700">Google</span>
-              </button>
-              <button className="flex items-center justify-center px-4 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all duration-200 hover:border-gray-300 hover:shadow-sm">
-                <span className="text-sm font-medium text-gray-700">Apple</span>
-              </button>
             </div>
           </div>
         </div>
-
-        {/* Demo Credentials */}
-        <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
-          <h4 className="font-semibold text-blue-900 mb-3 flex items-center">
-            <span className="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
-            Quick Demo Access
-          </h4>
-          <div className="space-y-2">
-            <button
-              onClick={() => handleDemoLogin('customer')}
-              className="w-full text-left p-3 bg-white rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-blue-900">Driver Account</span>
-                  <p className="text-xs text-blue-700">Find and book parking spots</p>
-                </div>
-                <Car className="h-5 w-5 text-blue-600" />
-              </div>
-            </button>
-            
-            <button
-              onClick={() => handleDemoLogin('admin')}
-              className="w-full text-left p-3 bg-white rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-blue-900">Owner Account</span>
-                  <p className="text-xs text-blue-700">Manage parking spaces</p>
-                </div>
-                <Building2 className="h-5 w-5 text-blue-600" />
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* Features Preview */}
-        {mode !== 'login' && (
-          <div className="mt-6 text-center">
-            <div className="grid grid-cols-3 gap-4 text-xs text-gray-600">
-              <div className="flex flex-col items-center">
-                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mb-1">
-                  <span className="text-green-600">✓</span>
-                </div>
-                <span>Instant Booking</span>
-              </div>
-              <div className="flex flex-col items-center">
-                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mb-1">
-                  <span className="text-green-600">✓</span>
-                </div>
-                <span>Secure Payments</span>
-              </div>
-              <div className="flex flex-col items-center">
-                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mb-1">
-                  <span className="text-green-600">✓</span>
-                </div>
-                <span>24/7 Support</span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

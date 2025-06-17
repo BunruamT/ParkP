@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Star, X, Send, Camera, Plus } from 'lucide-react';
+import { Star, X, Send, Camera } from 'lucide-react';
 
 interface RatingReviewModalProps {
   isOpen: boolean;
@@ -13,7 +14,6 @@ export const RatingReviewModal: React.FC<RatingReviewModalProps> = ({
   isOpen,
   onClose,
   spotName,
-  bookingId,
   onSubmit
 }) => {
   const [rating, setRating] = useState(0);

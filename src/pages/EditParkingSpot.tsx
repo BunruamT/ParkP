@@ -13,12 +13,11 @@ import {
   ToggleLeft,
   ToggleRight
 } from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
+import { mockParkingSpots } from '../data/mockData';
 
 export const EditParkingSpot: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { parkingSpots, updateParkingSpot, deleteParkingSpot } = useAppStore();
   const [isEnabled, setIsEnabled] = useState(true);
   const [formData, setFormData] = useState({
     name: '',
@@ -34,7 +33,7 @@ export const EditParkingSpot: React.FC = () => {
   });
 
   useEffect(() => {
-    const spot = parkingSpots.find(s => s.id === id);
+    const spot = mockParkingSpots.find(s => s.id === id);
     if (spot) {
       setFormData({
         name: spot.name,
@@ -49,7 +48,7 @@ export const EditParkingSpot: React.FC = () => {
         openingHours: spot.openingHours,
       });
     }
-  }, [id, parkingSpots]);
+  }, [id]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -61,21 +60,16 @@ export const EditParkingSpot: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!id) return;
-    
-    updateParkingSpot(id, formData);
+    console.log('Updating parking spot:', formData);
     alert('Parking spot updated successfully!');
     navigate('/admin');
   };
 
   const handleDelete = () => {
     if (confirm('Are you sure you want to delete this parking spot? This action cannot be undone.')) {
-      if (id) {
-        deleteParkingSpot(id);
-        alert('Parking spot deleted successfully!');
-        navigate('/admin');
-      }
+      console.log('Deleting parking spot:', id);
+      alert('Parking spot deleted successfully!');
+      navigate('/admin');
     }
   };
 

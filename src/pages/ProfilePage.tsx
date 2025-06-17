@@ -1,395 +1,346 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  User, 
-  Car, 
-  Receipt, 
-  Bell, 
-  Shield, 
-  LogOut,
-  Edit,
-  Plus,
-  Trash2,
-  Download
-} from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
-import { supabase } from '../lib/supabase';
 
-interface PaymentRecord {
-  id: string;
-  amount: number;
-  method: string;
-  status: string;
-  created_at: string;
-  bookings: {
-    parking_spots: {
-      name: string;
-    };
-  };
-}
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Badge } from '../components/ui/badge';
+import { User, Car, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
+import { database } from '../data/database';
+import { useAuth } from '../context/AuthContext';
+import { Vehicle } from '../types';
+import { useToast } from '../hooks/use-toast';
 
 export const ProfilePage: React.FC = () => {
-  const [activeSection, setActiveSection] = useState<'profile' | 'vehicles' | 'receipts' | 'settings'>('profile');
-  const [payments, setPayments] = useState<PaymentRecord[]>([]);
-  const [loadingPayments, setLoadingPayments] = useState(false);
+  const { user, updateUser } = useAuth();
+  const { toast } = useToast();
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isAddingVehicle, setIsAddingVehicle] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   
-  const { user, vehicles, fetchVehicles, logout } = useAppStore();
+  // Form states
+  const [name, setName] = useState(user?.name || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  
+  // New vehicle form state
+  const [newVehicle, setNewVehicle] = useState({
+    make: '',
+    model: '',
+    licensePlate: '',
+    color: ''
+  });
 
   useEffect(() => {
-    if (user) {
-      fetchVehicles();
-    }
-  }, [user, fetchVehicles]);
+    loadVehicles();
+  }, [user]);
 
-  useEffect(() => {
-    if (activeSection === 'receipts' && user) {
-      fetchPayments();
-    }
-  }, [activeSection, user]);
-
-  const fetchPayments = async () => {
+  const loadVehicles = async () => {
     if (!user) return;
     
+    setIsLoading(true);
     try {
-      setLoadingPayments(true);
-      const { data, error } = await supabase
-        .from('payments')
-        .select(`
-          id,
-          amount,
-          method,
-          status,
-          created_at,
-          bookings!inner(
-            parking_spots!inner(name)
-          )
-        `)
-        .eq('bookings.user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPayments(data || []);
+      const userVehicles = await database.getVehiclesByUserId(user.id);
+      setVehicles(userVehicles);
     } catch (error) {
-      console.error('Error fetching payments:', error);
+      console.error('Error loading vehicles:', error);
     } finally {
-      setLoadingPayments(false);
+      setIsLoading(false);
     }
   };
 
-  const menuItems = [
-    { id: 'profile', label: 'Profile Info', icon: User },
-    { id: 'vehicles', label: 'My Vehicles', icon: Car },
-    { id: 'receipts', label: 'Payment History', icon: Receipt },
-    { id: 'settings', label: 'Settings', icon: Shield },
-  ];
+  const handleSaveProfile = async () => {
+    if (!user) return;
 
-  const handleLogout = () => {
-    logout();
-  };
+    try {
+      const updatedUser = await database.updateUser(user.id, {
+        name,
+        email,
+        phone: phone || undefined
+      });
 
-  const ProfileSection = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Personal Information</h3>
-          <button className="flex items-center space-x-2 text-blue-600 hover:text-blue-800 transition-colors">
-            <Edit className="h-4 w-4" />
-            <span>Edit</span>
-          </button>
-        </div>
+      if (updatedUser) {
+        updateUser({
+          ...user,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          phone: updatedUser.phone
+        });
         
-        <div className="grid md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={user?.name || ''}
-              readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Email Address
-            </label>
-            <input
-              type="email"
-              value={user?.email || ''}
-              readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Phone Number
-            </label>
-            <input
-              type="tel"
-              value={user?.phone || ''}
-              readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Member Since
-            </label>
-            <input
-              type="text"
-              value="January 2024"
-              readOnly
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const VehiclesSection = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">My Vehicles</h3>
-          <button className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-            <Plus className="h-4 w-4" />
-            <span>Add Vehicle</span>
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          {vehicles.length > 0 ? (
-            vehicles.map((vehicle) => (
-              <div key={vehicle.id} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                      <Car className="h-6 w-6 text-blue-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-gray-900">
-                        {vehicle.make} {vehicle.model}
-                      </h4>
-                      <p className="text-sm text-gray-600">
-                        {vehicle.licensePlate} • {vehicle.color}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button className="p-2 text-gray-600 hover:text-blue-600 transition-colors">
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button className="p-2 text-gray-600 hover:text-red-600 transition-colors">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Car className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p>No vehicles added yet</p>
-              <p className="text-sm">Add a vehicle to start booking parking spots</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  const ReceiptsSection = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Payment History</h3>
-          <button className="flex items-center space-x-2 text-blue-600 hover:text-blue-800 transition-colors">
-            <Download className="h-4 w-4" />
-            <span>Export All</span>
-          </button>
-        </div>
-
-        {loadingPayments ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-500">Loading payment history...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {payments.length > 0 ? (
-              payments.map((payment) => (
-                <div key={payment.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold text-gray-900">
-                        {payment.bookings.parking_spots.name}
-                      </h4>
-                      <div className="flex items-center space-x-4 text-sm text-gray-600">
-                        <span>{new Date(payment.created_at).toLocaleDateString()}</span>
-                        <span>•</span>
-                        <span>{payment.method}</span>
-                        <span>•</span>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          payment.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                          payment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {payment.status}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-lg font-semibold text-gray-900">
-                        ${payment.amount}
-                      </div>
-                      <button className="text-sm text-blue-600 hover:text-blue-800 transition-colors">
-                        Download
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Receipt className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>No payment history</p>
-                <p className="text-sm">Your payment records will appear here</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const SettingsSection = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-6">Account Settings</h3>
+        toast({
+          title: "Profile Updated",
+          description: "Your profile has been successfully updated",
+        });
         
-        <div className="space-y-6">
-          <div className="flex items-center justify-between py-4 border-b border-gray-200">
-            <div className="flex items-center space-x-3">
-              <Bell className="h-5 w-5 text-gray-600" />
-              <div>
-                <p className="font-medium text-gray-900">Notifications</p>
-                <p className="text-sm text-gray-600">Receive booking alerts and updates</p>
-              </div>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" defaultChecked className="sr-only peer" />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
-          </div>
-
-          <div className="flex items-center justify-between py-4 border-b border-gray-200">
-            <div className="flex items-center space-x-3">
-              <Shield className="h-5 w-5 text-gray-600" />
-              <div>
-                <p className="font-medium text-gray-900">Two-Factor Authentication</p>
-                <p className="text-sm text-gray-600">Add an extra layer of security</p>
-              </div>
-            </div>
-            <button className="text-blue-600 hover:text-blue-800 font-medium transition-colors">
-              Enable
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between py-4">
-            <div className="flex items-center space-x-3">
-              <LogOut className="h-5 w-5 text-red-600" />
-              <div>
-                <p className="font-medium text-gray-900">Sign Out</p>
-                <p className="text-sm text-gray-600">Sign out of your account</p>
-              </div>
-            </div>
-            <button 
-              onClick={handleLogout}
-              className="text-red-600 hover:text-red-800 font-medium transition-colors"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderContent = () => {
-    switch (activeSection) {
-      case 'profile': return <ProfileSection />;
-      case 'vehicles': return <VehiclesSection />;
-      case 'receipts': return <ReceiptsSection />;
-      case 'settings': return <SettingsSection />;
-      default: return <ProfileSection />;
+        setIsEditing(false);
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update profile",
+        variant: "destructive",
+      });
     }
   };
 
-  if (!user) {
+  const handleAddVehicle = async () => {
+    if (!user || !newVehicle.make || !newVehicle.model || !newVehicle.licensePlate) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const vehicleData: Omit<Vehicle, 'id'> & { user_id: string } = {
+        ...newVehicle,
+        user_id: user.id
+      };
+
+      // Since we don't have an addVehicle method, we'll simulate it
+      const newVehicleId = `vehicle_${Date.now()}`;
+      const vehicle: Vehicle = {
+        id: newVehicleId,
+        ...newVehicle
+      };
+
+      setVehicles([...vehicles, vehicle]);
+      setNewVehicle({ make: '', model: '', licensePlate: '', color: '' });
+      setIsAddingVehicle(false);
+      
+      toast({
+        title: "Vehicle Added",
+        description: "Your vehicle has been successfully added",
+      });
+    } catch (error) {
+      console.error('Error adding vehicle:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add vehicle",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteVehicle = async (vehicleId: string) => {
+    try {
+      setVehicles(vehicles.filter(v => v.id !== vehicleId));
+      
+      toast({
+        title: "Vehicle Removed",
+        description: "Your vehicle has been successfully removed",
+      });
+    } catch (error) {
+      console.error('Error deleting vehicle:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete vehicle",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading profile...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            My Profile
-          </h1>
-          <p className="text-gray-600">
-            Manage your account settings and preferences
-          </p>
-        </div>
-
-        <div className="grid lg:grid-cols-4 gap-8">
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="flex items-center space-x-3 mb-6">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                  <User className="h-6 w-6 text-blue-600" />
+    <div className="container py-8">
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Profile Information */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center space-x-2">
+                <User className="h-5 w-5" />
+                <span>Profile Information</span>
+              </CardTitle>
+              {!isEditing ? (
+                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                  <Edit2 className="h-4 w-4 mr-2" />
+                  Edit
+                </Button>
+              ) : (
+                <div className="flex space-x-2">
+                  <Button variant="outline" onClick={() => setIsEditing(false)}>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveProfile}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save
+                  </Button>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">{user.name}</h3>
-                  <p className="text-sm text-gray-600">{user.email}</p>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div>
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  disabled={!isEditing}
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <Label>Account Type</Label>
+                <div className="mt-2">
+                  <Badge variant={user?.userType === 'owner' ? 'default' : 'secondary'}>
+                    {user?.userType === 'owner' ? 'Parking Owner' : 'Customer'}
+                  </Badge>
                 </div>
               </div>
-
-              <nav className="space-y-2">
-                {menuItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setActiveSection(item.id as any)}
-                      className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                        activeSection === item.id
-                          ? 'bg-blue-50 text-blue-600'
-                          : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
-              </nav>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Content */}
-          <div className="lg:col-span-3">
-            {renderContent()}
-          </div>
-        </div>
+        {/* Vehicle Management */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center space-x-2">
+                <Car className="h-5 w-5" />
+                <span>My Vehicles ({vehicles?.length || 0})</span>
+              </CardTitle>
+              <Button onClick={() => setIsAddingVehicle(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Vehicle
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {/* Add Vehicle Form */}
+            {isAddingVehicle && (
+              <div className="border rounded-lg p-4 mb-4 bg-gray-50">
+                <h4 className="font-medium mb-4">Add New Vehicle</h4>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="make">Make</Label>
+                    <Input
+                      id="make"
+                      value={newVehicle.make}
+                      onChange={(e) => setNewVehicle({...newVehicle, make: e.target.value})}
+                      placeholder="e.g., Toyota"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="model">Model</Label>
+                    <Input
+                      id="model"
+                      value={newVehicle.model}
+                      onChange={(e) => setNewVehicle({...newVehicle, model: e.target.value})}
+                      placeholder="e.g., Camry"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="licensePlate">License Plate</Label>
+                    <Input
+                      id="licensePlate"
+                      value={newVehicle.licensePlate}
+                      onChange={(e) => setNewVehicle({...newVehicle, licensePlate: e.target.value})}
+                      placeholder="e.g., ABC123"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="color">Color</Label>
+                    <Input
+                      id="color"
+                      value={newVehicle.color}
+                      onChange={(e) => setNewVehicle({...newVehicle, color: e.target.value})}
+                      placeholder="e.g., Blue"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-2 mt-4">
+                  <Button variant="outline" onClick={() => setIsAddingVehicle(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAddVehicle}>
+                    Add Vehicle
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Vehicle List */}
+            {vehicles && vehicles.length > 0 ? (
+              <div className="grid gap-4">
+                {vehicles.map((vehicle, index) => (
+                  <div key={vehicle.id || index} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Car className="h-6 w-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">{vehicle.make} {vehicle.model}</h4>
+                        <p className="text-sm text-gray-600">{vehicle.licensePlate}</p>
+                        <p className="text-sm text-gray-500">{vehicle.color}</p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingVehicle(vehicle.id)}
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteVehicle(vehicle.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Car className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  No vehicles added
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Add your vehicle information to make booking easier
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

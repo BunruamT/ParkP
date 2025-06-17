@@ -1,421 +1,273 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Calendar, 
-  Clock, 
-  Plus, 
-  Edit, 
-  Trash2,
-  AlertCircle,
-  CheckCircle,
-  XCircle
-} from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
 
-interface TimeSlot {
-  id: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  status: 'available' | 'blocked' | 'maintenance';
-  reason?: string;
-  slotsAffected: number;
-}
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Calendar, Clock, Car, Save, ArrowLeft } from 'lucide-react';
+import { database } from '../data/database';
+import { useAuth } from '../context/AuthContext';
+import { ParkingSpot, Booking } from '../types';
+import { useToast } from '../hooks/use-toast';
 
 export const ManageAvailability: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { parkingSpots } = useAppStore();
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showAddBlock, setShowAddBlock] = useState(false);
-  const [newBlock, setNewBlock] = useState({
-    date: new Date().toISOString().split('T')[0],
-    startTime: '',
-    endTime: '',
-    status: 'blocked' as 'blocked' | 'maintenance',
-    reason: '',
-    slotsAffected: 1
-  });
+  const { user } = useAuth();
+  const { toast } = useToast();
+  
+  const [spot, setSpot] = useState<ParkingSpot | null>(null);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const spot = parkingSpots.find(s => s.id === id);
+  useEffect(() => {
+    loadData();
+  }, [id, user]);
 
-  // Mock time slots data
-  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([
-    {
-      id: '1',
-      date: '2024-01-20',
-      startTime: '14:00',
-      endTime: '16:00',
-      status: 'blocked',
-      reason: 'Private event',
-      slotsAffected: 10
-    },
-    {
-      id: '2',
-      date: '2024-01-22',
-      startTime: '08:00',
-      endTime: '12:00',
-      status: 'maintenance',
-      reason: 'Cleaning and maintenance',
-      slotsAffected: 25
+  const loadData = async () => {
+    if (!id || !user) return;
+    
+    setIsLoading(true);
+    try {
+      const spotData = await database.getParkingSpotById(id);
+      const spotBookings = spotData ? await database.getBookingsBySpotId(spotData.id) : [];
+      
+      setSpot(spotData || null);
+      setBookings(spotBookings);
+      setAvailableSlots(spotData?.availableSlots || 0);
+    } catch (error) {
+      console.error('Error loading availability data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load availability information",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
     }
-  ]);
+  };
+
+  const handleSaveAvailability = async () => {
+    if (!spot || !user) return;
+    
+    setIsSaving(true);
+    try {
+      await database.updateParkingSpot(spot.id, { availableSlots });
+      
+      toast({
+        title: "Success",
+        description: "Availability updated successfully",
+      });
+      
+      navigate('/app/admin');
+    } catch (error) {
+      console.error('Error updating availability:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update availability",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const getActiveBookings = () => {
+    const now = new Date();
+    return bookings.filter(booking => 
+      booking.status === 'active' && 
+      new Date(booking.startTime) <= now && 
+      new Date(booking.endTime) >= now
+    );
+  };
+
+  const getUpcomingBookings = () => {
+    const now = new Date();
+    return bookings.filter(booking => 
+      booking.status === 'pending' && 
+      new Date(booking.startTime) > now
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (!spot) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
-            Parking spot not found
-          </h2>
-          <button 
-            onClick={() => navigate('/admin')}
-            className="text-blue-600 hover:text-blue-800"
-          >
-            Return to dashboard
-          </button>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Spot Not Found</h2>
+          <p className="text-gray-600">The parking spot you're looking for doesn't exist.</p>
         </div>
       </div>
     );
   }
 
-  const handleAddBlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newSlot: TimeSlot = {
-      id: Date.now().toString(),
-      ...newBlock
-    };
-    setTimeSlots(prev => [...prev, newSlot]);
-    setNewBlock({
-      date: new Date().toISOString().split('T')[0],
-      startTime: '',
-      endTime: '',
-      status: 'blocked',
-      reason: '',
-      slotsAffected: 1
-    });
-    setShowAddBlock(false);
-  };
-
-  const handleDeleteBlock = (blockId: string) => {
-    if (confirm('Are you sure you want to remove this time block?')) {
-      setTimeSlots(prev => prev.filter(slot => slot.id !== blockId));
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'available': return 'text-green-600 bg-green-100';
-      case 'blocked': return 'text-red-600 bg-red-100';
-      case 'maintenance': return 'text-orange-600 bg-orange-100';
-      default: return 'text-gray-600 bg-gray-100';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'available': return <CheckCircle className="h-4 w-4" />;
-      case 'blocked': return <XCircle className="h-4 w-4" />;
-      case 'maintenance': return <AlertCircle className="h-4 w-4" />;
-      default: return <Clock className="h-4 w-4" />;
-    }
-  };
-
-  const filteredSlots = timeSlots.filter(slot => slot.date === selectedDate);
+  const activeBookings = getActiveBookings();
+  const upcomingBookings = getUpcomingBookings();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <button 
-          onClick={() => navigate('/admin')}
-          className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-        >
-          <ArrowLeft className="h-5 w-5" />
-          <span>Back to Dashboard</span>
-        </button>
-
-        <div className="bg-white rounded-xl shadow-lg p-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Manage Availability
-            </h1>
-            <p className="text-gray-600 mb-4">
-              {spot.name} - Control when your parking spots are available
-            </p>
-            <div className="bg-blue-50 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-blue-900">Total Slots: {spot.totalSlots}</p>
-                  <p className="text-sm text-blue-700">Currently Available: {spot.availableSlots}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-blue-700">Occupancy Rate</p>
-                  <p className="text-2xl font-bold text-blue-900">
-                    {Math.round(((spot.totalSlots - spot.availableSlots) / spot.totalSlots) * 100)}%
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Date Selector */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-4">
-                <Calendar className="h-5 w-5 text-gray-600" />
-                <label className="block text-sm font-medium text-gray-700">
-                  Select Date
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
-              <button
-                onClick={() => setShowAddBlock(true)}
-                className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Block Time</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Time Blocks for Selected Date */}
-          <div className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              Time Blocks for {new Date(selectedDate).toLocaleDateString()}
-            </h3>
-            
-            {filteredSlots.length > 0 ? (
-              <div className="space-y-4">
-                {filteredSlots.map((slot) => (
-                  <div key={slot.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(slot.status)}`}>
-                          {getStatusIcon(slot.status)}
-                          <span className="capitalize">{slot.status}</span>
-                        </div>
-                        <div className="flex items-center space-x-2 text-gray-600">
-                          <Clock className="h-4 w-4" />
-                          <span>{slot.startTime} - {slot.endTime}</span>
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {slot.slotsAffected} slots affected
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <button className="p-2 text-gray-600 hover:text-blue-600 transition-colors">
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteBlock(slot.id)}
-                          className="p-2 text-gray-600 hover:text-red-600 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {slot.reason && (
-                      <div className="mt-2 text-sm text-gray-600">
-                        <strong>Reason:</strong> {slot.reason}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Calendar className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>No time blocks set for this date</p>
-                <p className="text-sm">All slots are available during operating hours</p>
-              </div>
-            )}
-          </div>
-
-          {/* All Time Blocks */}
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              All Upcoming Time Blocks
-            </h3>
-            
-            {timeSlots.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Date</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Time</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Status</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Slots</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Reason</th>
-                      <th className="text-left py-3 px-4 font-semibold text-gray-900">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {timeSlots.map((slot) => (
-                      <tr key={slot.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4">{new Date(slot.date).toLocaleDateString()}</td>
-                        <td className="py-3 px-4">{slot.startTime} - {slot.endTime}</td>
-                        <td className="py-3 px-4">
-                          <div className={`inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(slot.status)}`}>
-                            {getStatusIcon(slot.status)}
-                            <span className="capitalize">{slot.status}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">{slot.slotsAffected}</td>
-                        <td className="py-3 px-4 text-sm text-gray-600">{slot.reason || '-'}</td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center space-x-1">
-                            <button className="p-1 hover:bg-gray-200 rounded transition-colors">
-                              <Edit className="h-4 w-4 text-gray-500" />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteBlock(slot.id)}
-                              className="p-1 hover:bg-red-100 rounded transition-colors"
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                <Clock className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>No time blocks configured</p>
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-4xl mx-auto px-4">
+        <div className="mb-6">
+          <Button
+            variant="outline"
+            onClick={() => navigate('/app/admin')}
+            className="mb-4"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+          <h1 className="text-3xl font-bold text-gray-900">{spot.name}</h1>
+          <p className="text-gray-600">{spot.address}</p>
         </div>
 
-        {/* Add Block Modal */}
-        {showAddBlock && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-bold text-gray-900">Block Time Slot</h3>
-                  <button
-                    onClick={() => setShowAddBlock(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <XCircle className="h-5 w-5 text-gray-500" />
-                  </button>
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Availability Management */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Car className="h-5 w-5 text-blue-600" />
+                <span>Manage Availability</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Total Slots</Label>
+                  <Input
+                    type="number"
+                    value={spot.totalSlots}
+                    disabled
+                    className="bg-gray-50"
+                  />
                 </div>
-
-                <form onSubmit={handleAddBlock} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Date
-                    </label>
-                    <input
-                      type="date"
-                      value={newBlock.date}
-                      onChange={(e) => setNewBlock(prev => ({ ...prev, date: e.target.value }))}
-                      min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Start Time
-                      </label>
-                      <input
-                        type="time"
-                        value={newBlock.startTime}
-                        onChange={(e) => setNewBlock(prev => ({ ...prev, startTime: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        End Time
-                      </label>
-                      <input
-                        type="time"
-                        value={newBlock.endTime}
-                        onChange={(e) => setNewBlock(prev => ({ ...prev, endTime: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      value={newBlock.status}
-                      onChange={(e) => setNewBlock(prev => ({ ...prev, status: e.target.value as 'blocked' | 'maintenance' }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    >
-                      <option value="blocked">Blocked</option>
-                      <option value="maintenance">Maintenance</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Slots Affected
-                    </label>
-                    <input
-                      type="number"
-                      value={newBlock.slotsAffected}
-                      onChange={(e) => setNewBlock(prev => ({ ...prev, slotsAffected: parseInt(e.target.value) || 1 }))}
-                      min="1"
-                      max={spot.totalSlots}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Reason (Optional)
-                    </label>
-                    <textarea
-                      value={newBlock.reason}
-                      onChange={(e) => setNewBlock(prev => ({ ...prev, reason: e.target.value }))}
-                      rows={3}
-                      placeholder="e.g., Private event, Cleaning, Repairs..."
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddBlock(false)}
-                      className="flex-1 border border-gray-200 py-2 px-4 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                    >
-                      Add Block
-                    </button>
-                  </div>
-                </form>
+                <div>
+                  <Label htmlFor="availableSlots">Available Slots</Label>
+                  <Input
+                    id="availableSlots"
+                    type="number"
+                    value={availableSlots}
+                    onChange={(e) => setAvailableSlots(parseInt(e.target.value) || 0)}
+                    min={0}
+                    max={spot.totalSlots}
+                  />
+                </div>
               </div>
-            </div>
+
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-medium text-gray-900 mb-2">Current Status</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Total Slots:</span>
+                    <span className="font-medium">{spot.totalSlots}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Available Slots:</span>
+                    <span className="font-medium text-green-600">{availableSlots}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Occupied Slots:</span>
+                    <span className="font-medium text-red-600">{spot.totalSlots - availableSlots}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Occupancy Rate:</span>
+                    <span className="font-medium">
+                      {((spot.totalSlots - availableSlots) / spot.totalSlots * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleSaveAvailability}
+                disabled={isSaving}
+                className="w-full"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Current Bookings */}
+          <div className="space-y-6">
+            {/* Active Bookings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Clock className="h-5 w-5 text-green-600" />
+                  <span>Active Bookings ({activeBookings.length})</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {activeBookings.length > 0 ? (
+                  <div className="space-y-3">
+                    {activeBookings.map((booking) => (
+                      <div key={booking.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                        <div>
+                          <p className="font-medium text-sm">Booking #{booking.id.slice(0, 8)}</p>
+                          <p className="text-xs text-gray-600">
+                            {new Date(booking.startTime).toLocaleString()} - {new Date(booking.endTime).toLocaleString()}
+                          </p>
+                        </div>
+                        <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                          Active
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-4">No active bookings</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Upcoming Bookings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Calendar className="h-5 w-5 text-blue-600" />
+                  <span>Upcoming Bookings ({upcomingBookings.length})</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {upcomingBookings.length > 0 ? (
+                  <div className="space-y-3">
+                    {upcomingBookings.slice(0, 5).map((booking) => (
+                      <div key={booking.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                        <div>
+                          <p className="font-medium text-sm">Booking #{booking.id.slice(0, 8)}</p>
+                          <p className="text-xs text-gray-600">
+                            {new Date(booking.startTime).toLocaleString()}
+                          </p>
+                        </div>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                          Pending
+                        </span>
+                      </div>
+                    ))}
+                    {upcomingBookings.length > 5 && (
+                      <p className="text-sm text-gray-500 text-center">
+                        +{upcomingBookings.length - 5} more bookings
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-4">No upcoming bookings</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

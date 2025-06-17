@@ -1,494 +1,310 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Calendar, 
-  Clock, 
-  Car, 
-  CreditCard,
-  QrCode,
-  Check,
-  Copy,
-  Download
-} from 'lucide-react';
-import { useAppStore } from '../store/AppStore';
-import { QRCodeGenerator } from '../components/QRCodeGenerator';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Calendar, Clock, MapPin, Car, CreditCard, Shield } from 'lucide-react';
+import { database } from '../data/database';
+import { useAuth } from '../context/AuthContext';
+import { ParkingSpot, User, Vehicle, Booking } from '../types';
+import { useToast } from '../hooks/use-toast';
 
 export const BookingPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { parkingSpots, user, createBooking } = useAppStore();
+  const { user } = useAuth();
+  const { toast } = useToast();
   
-  const [step, setStep] = useState<'time' | 'payment' | 'success'>('time');
-  const [selectedVehicle, setSelectedVehicle] = useState(user?.vehicles[0]?.id || '');
+  const [spot, setSpot] = useState<ParkingSpot | null>(null);
+  const [owner, setOwner] = useState<User | null>(null);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('');
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('card');
-  const [createdBooking, setCreatedBooking] = useState<any>(null);
-  
-  // Get parking spot from store instead of mock data
-  const spot = parkingSpots.find(s => s.id === id);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isBooking, setIsBooking] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, [id, user]);
+
+  const loadData = async () => {
+    if (!id || !user) return;
+    
+    setIsLoading(true);
+    try {
+      const spotData = await database.getParkingSpotById(id);
+      const ownerData = spotData ? await database.getUserById(spotData.ownerId) : null;
+      const userVehicles = await database.getVehiclesByUserId(user.id);
+      
+      setSpot(spotData || null);
+      setOwner(ownerData || null);
+      setVehicles(userVehicles);
+    } catch (error) {
+      console.error('Error loading booking data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load booking information",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const calculateCost = () => {
+    if (!spot || !startDate || !startTime || !endDate || !endTime) return 0;
+    
+    const start = new Date(`${startDate}T${startTime}`);
+    const end = new Date(`${endDate}T${endTime}`);
+    const diffInHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+    
+    if (spot.priceType === 'hour') {
+      return Math.ceil(diffInHours) * spot.price;
+    } else if (spot.priceType === 'day') {
+      const diffInDays = Math.ceil(diffInHours / 24);
+      return diffInDays * spot.price;
+    } else if (spot.priceType === 'month') {
+      const diffInMonths = Math.ceil(diffInHours / (24 * 30));
+      return diffInMonths * spot.price;
+    }
+    
+    return 0;
+  };
+
+  const handleBooking = async () => {
+    if (!spot || !user || !selectedVehicle || !startDate || !startTime || !endDate || !endTime) {
+      toast({
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsBooking(true);
+    try {
+      const startDateTime = new Date(`${startDate}T${startTime}`).toISOString();
+      const endDateTime = new Date(`${endDate}T${endTime}`).toISOString();
+      const totalCost = calculateCost();
+      
+      const bookingData: Omit<Booking, 'id' | 'createdAt'> = {
+        spotId: spot.id,
+        userId: user.id,
+        vehicleId: selectedVehicle,
+        startTime: startDateTime,
+        endTime: endDateTime,
+        totalCost,
+        status: 'pending',
+        qrCode: `QR_${spot.id}_${user.id}_${Date.now()}`,
+        pin: Math.floor(1000 + Math.random() * 9000).toString(),
+      };
+
+      await database.createBooking(bookingData);
+      
+      toast({
+        title: "Booking Confirmed!",
+        description: "Your parking spot has been successfully booked",
+      });
+      
+      navigate('/app/bookings');
+    } catch (error) {
+      console.error('Error creating booking:', error);
+      toast({
+        title: "Booking Failed",
+        description: "Failed to create booking. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   if (!spot) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
-            Parking spot not found
-          </h2>
-          <button 
-            onClick={() => navigate('/')}
-            className="text-blue-600 hover:text-blue-800"
-          >
-            Return to home
-          </button>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Spot Not Found</h2>
+          <p className="text-gray-600">The parking spot you're looking for doesn't exist.</p>
         </div>
       </div>
     );
   }
 
-  if (!user) {
-    navigate('/login');
-    return null;
-  }
-
-  const calculateDuration = () => {
-    if (!startTime || !endTime) return 0;
-    const start = new Date(`2024-01-01 ${startTime}`);
-    const end = new Date(`2024-01-01 ${endTime}`);
-    const diffMs = end.getTime() - start.getTime();
-    return Math.max(0, diffMs / (1000 * 60 * 60)); // hours
-  };
-
-  const calculateTotal = () => {
-    const duration = calculateDuration();
-    let cost = 0;
-    
-    if (spot.priceType === 'hour') {
-      cost = duration * spot.price;
-    } else if (spot.priceType === 'day') {
-      cost = Math.ceil(duration / 24) * spot.price;
-    } else if (spot.priceType === 'month') {
-      cost = Math.ceil(duration / (24 * 30)) * spot.price;
-    }
-    
-    return Math.round(cost * 100) / 100;
-  };
-
-  const handleBooking = () => {
-    if (step === 'time') {
-      if (!startDate || !startTime || !endTime || !selectedVehicle) {
-        alert('Please fill in all required fields');
-        return;
-      }
-      
-      if (calculateDuration() <= 0) {
-        alert('End time must be after start time');
-        return;
-      }
-      
-      setStep('payment');
-    } else if (step === 'payment') {
-      // Create the booking
-      const startDateTime = new Date(`${startDate}T${startTime}`).toISOString();
-      const endDateTime = new Date(`${startDate}T${endTime}`).toISOString();
-      
-      const booking = createBooking({
-        spotId: spot.id,
-        userId: user.id,
-        startTime: startDateTime,
-        endTime: endDateTime,
-        vehicleId: selectedVehicle,
-        totalCost: calculateTotal(),
-        status: 'pending'
-      });
-      
-      setCreatedBooking(booking);
-      setStep('success');
-    }
-  };
-
-  const copyToClipboard = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    alert(`${type} copied to clipboard!`);
-  };
-
-  const downloadQR = () => {
-    // In a real app, you'd generate and download the QR code image
-    alert('QR Code download functionality would be implemented here');
-  };
-
-  if (step === 'success' && createdBooking) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="max-w-md mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
-          {/* Success Header */}
-          <div className="bg-green-50 p-6 text-center border-b">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Check className="h-8 w-8 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Booking Successful!
-            </h2>
-            <p className="text-green-700">
-              Your parking spot has been reserved
-            </p>
-          </div>
-
-          <div className="p-6">
-            {/* Booking Details */}
-            <div className="bg-gray-50 rounded-lg p-4 mb-6">
-              <h3 className="font-semibold text-gray-900 mb-2">{spot.name}</h3>
-              <p className="text-sm text-gray-600 mb-2">{spot.address}</p>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Date:</span>
-                <span className="font-medium">{new Date(startDate).toLocaleDateString()}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Time:</span>
-                <span className="font-medium">{startTime} - {endTime}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Duration:</span>
-                <span className="font-medium">{calculateDuration().toFixed(1)} hours</span>
-              </div>
-              <div className="flex justify-between text-sm pt-2 border-t border-gray-200 mt-2">
-                <span className="text-gray-600">Total:</span>
-                <span className="font-bold text-lg">${calculateTotal()}</span>
-              </div>
-            </div>
-
-            {/* QR Code Section */}
-            <div className="bg-blue-50 rounded-lg p-4 mb-4 text-center">
-              <h4 className="font-semibold text-blue-900 mb-3">Entry QR Code</h4>
-              <QRCodeGenerator 
-                value={createdBooking.qrCode} 
-                size={160}
-                className="mb-3"
-              />
-              <p className="text-sm text-blue-700 mb-3">
-                Show this QR code to the parking attendant
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={downloadQR}
-                  className="flex-1 flex items-center justify-center space-x-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  <Download className="h-4 w-4" />
-                  <span>Save QR</span>
-                </button>
-                <button
-                  onClick={() => copyToClipboard(createdBooking.qrCode, 'QR Code')}
-                  className="flex-1 flex items-center justify-center space-x-1 border border-blue-200 text-blue-600 py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
-                >
-                  <Copy className="h-4 w-4" />
-                  <span>Copy</span>
-                </button>
-              </div>
-            </div>
-
-            {/* PIN Backup */}
-            <div className="bg-orange-50 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center space-x-2">
-                  <QrCode className="h-5 w-5 text-orange-600" />
-                  <span className="font-semibold text-orange-900">Backup PIN</span>
-                </div>
-                <button
-                  onClick={() => copyToClipboard(createdBooking.pin, 'PIN')}
-                  className="p-1 hover:bg-orange-100 rounded transition-colors"
-                >
-                  <Copy className="h-4 w-4 text-orange-600" />
-                </button>
-              </div>
-              <div className="text-3xl font-bold text-orange-900 text-center mb-2 font-mono tracking-wider">
-                {createdBooking.pin}
-              </div>
-              <p className="text-sm text-orange-700 text-center">
-                Use this PIN if QR code doesn't work
-              </p>
-            </div>
-
-            {/* Booking ID */}
-            <div className="bg-gray-50 rounded-lg p-3 mb-6 text-center">
-              <p className="text-sm text-gray-600">
-                Booking ID: <span className="font-mono font-semibold">{createdBooking.id}</span>
-              </p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="space-y-3">
-              <button 
-                onClick={() => {
-                  // In a real app, this would open navigation app
-                  alert('Opening navigation to parking location...');
-                }}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-              >
-                Navigate to Parking
-              </button>
-              <div className="grid grid-cols-2 gap-3">
-                <button 
-                  onClick={() => navigate('/bookings')}
-                  className="border border-gray-200 py-2 px-4 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
-                >
-                  My Bookings
-                </button>
-                <button 
-                  onClick={() => navigate('/')}
-                  className="border border-gray-200 py-2 px-4 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
-                >
-                  Book More
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const totalCost = calculateCost();
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-2xl mx-auto px-4 py-8">
-        <button 
-          onClick={() => navigate(-1)}
-          className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-        >
-          <ArrowLeft className="h-5 w-5" />
-          <span>Back</span>
-        </button>
-
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          {/* Progress Indicator */}
-          <div className="bg-gray-50 px-6 py-4">
-            <div className="flex items-center space-x-4">
-              <div className={`flex items-center space-x-2 ${
-                step === 'time' ? 'text-blue-600' : 'text-green-600'
-              }`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
-                  step === 'time' ? 'bg-blue-600 text-white' : 'bg-green-600 text-white'
-                }`}>
-                  {step === 'time' ? '1' : <Check className="h-4 w-4" />}
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-4xl mx-auto px-4">
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Spot Details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <MapPin className="h-5 w-5 text-blue-600" />
+                <span>{spot.name}</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <img 
+                src={spot.images[0]} 
+                alt={spot.name}
+                className="w-full h-48 object-cover rounded-lg"
+              />
+              
+              <div className="space-y-2">
+                <p className="text-gray-600">{spot.address}</p>
+                <p className="text-gray-600">{spot.description}</p>
+                
+                <div className="flex items-center space-x-4 text-sm text-gray-500">
+                  <span className="flex items-center">
+                    <Clock className="h-4 w-4 mr-1" />
+                    {spot.openingHours}
+                  </span>
+                  <span className="flex items-center">
+                    <Car className="h-4 w-4 mr-1" />
+                    {spot.availableSlots}/{spot.totalSlots} available
+                  </span>
                 </div>
-                <span className="text-sm font-medium">Select Time</span>
-              </div>
-              <div className="flex-1 h-px bg-gray-300"></div>
-              <div className={`flex items-center space-x-2 ${
-                step === 'payment' ? 'text-blue-600' : 'text-gray-400'
-              }`}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
-                  step === 'payment' ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'
-                }`}>
-                  2
-                </div>
-                <span className="text-sm font-medium">Payment</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-6">
-            {/* Parking Spot Info */}
-            <div className="bg-gray-50 rounded-lg p-4 mb-6">
-              <h3 className="font-semibold text-gray-900 mb-1">{spot.name}</h3>
-              <p className="text-sm text-gray-600 mb-2">{spot.address}</p>
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-blue-600 font-medium">
-                  ${spot.price}/{spot.priceType}
-                </p>
-                <p className="text-sm text-gray-600">
-                  {spot.availableSlots} / {spot.totalSlots} available
-                </p>
-              </div>
-            </div>
-
-            {step === 'time' && (
-              <>
-                <h2 className="text-xl font-bold text-gray-900 mb-6">
-                  Select Parking Time
-                </h2>
-
-                <div className="space-y-6">
-                  {/* Date Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <Calendar className="inline h-4 w-4 mr-1" />
-                      Date
-                    </label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                      required
-                    />
-                  </div>
-
-                  {/* Time Selection */}
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        <Clock className="inline h-4 w-4 mr-1" />
-                        Start Time
-                      </label>
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full px-3 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        End Time
-                      </label>
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full px-3 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Vehicle Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <Car className="inline h-4 w-4 mr-1" />
-                      Select Vehicle
-                    </label>
-                    <select
-                      value={selectedVehicle}
-                      onChange={(e) => setSelectedVehicle(e.target.value)}
-                      className="w-full px-3 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                      required
+                
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {spot.amenities.map((amenity, index) => (
+                    <span 
+                      key={index}
+                      className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
                     >
-                      <option value="">Select a vehicle</option>
-                      {user.vehicles.map((vehicle) => (
-                        <option key={vehicle.id} value={vehicle.id}>
-                          {vehicle.make} {vehicle.model} - {vehicle.licensePlate}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Cost Summary */}
-                  {startTime && endTime && calculateDuration() > 0 && (
-                    <div className="bg-blue-50 rounded-lg p-4">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="text-sm text-blue-700">
-                            Duration: {calculateDuration().toFixed(1)} hours
-                          </p>
-                          <p className="text-sm text-blue-700">
-                            Rate: ${spot.price}/{spot.priceType}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-blue-900">
-                            ${calculateTotal()}
-                          </p>
-                          <p className="text-sm text-blue-700">Total Cost</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                      {amenity}
+                    </span>
+                  ))}
                 </div>
-              </>
-            )}
+              </div>
+              
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-gray-900">Price</span>
+                  <span className="text-2xl font-bold text-blue-600">
+                    ${spot.price}/{spot.priceType}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-            {step === 'payment' && (
-              <>
-                <h2 className="text-xl font-bold text-gray-900 mb-6">
-                  Payment Details
-                </h2>
+          {/* Booking Form */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <CreditCard className="h-5 w-5 text-green-600" />
+                <span>Book This Spot</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Vehicle Selection */}
+              <div>
+                <Label htmlFor="vehicle">Select Vehicle</Label>
+                <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose your vehicle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {vehicles.map((vehicle) => (
+                      <SelectItem key={vehicle.id} value={vehicle.id}>
+                        {vehicle.make} {vehicle.model} - {vehicle.licensePlate}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                <div className="space-y-6">
-                  {/* Payment Method */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      Payment Method
-                    </label>
-                    <div className="space-y-2">
-                      {[
-                        { id: 'card', name: 'Credit/Debit Card', icon: <CreditCard className="h-5 w-5" /> },
-                        { id: 'qr', name: 'QR Payment (PromptPay)', icon: <QrCode className="h-5 w-5" /> },
-                        { id: 'wallet', name: 'E-Wallet', icon: <Car className="h-5 w-5" /> }
-                      ].map((method) => (
-                        <label key={method.id} className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                          <input
-                            type="radio"
-                            name="payment"
-                            value={method.id}
-                            checked={paymentMethod === method.id}
-                            onChange={(e) => setPaymentMethod(e.target.value)}
-                            className="mr-3"
-                          />
-                          <div className="flex items-center space-x-2">
-                            {method.icon}
-                            <span>{method.name}</span>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+              {/* Start Date/Time */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="startDate">Start Date</Label>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="startTime">Start Time</Label>
+                  <Input
+                    id="startTime"
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                  />
+                </div>
+              </div>
 
-                  {/* Booking Summary */}
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <h4 className="font-semibold text-gray-900 mb-3">Booking Summary</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Date:</span>
-                        <span>{new Date(startDate).toLocaleDateString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Time:</span>
-                        <span>{startTime} - {endTime}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Duration:</span>
-                        <span>{calculateDuration().toFixed(1)} hours</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Vehicle:</span>
-                        <span>{user.vehicles.find(v => v.id === selectedVehicle)?.licensePlate}</span>
-                      </div>
-                      <div className="flex justify-between font-semibold text-base pt-2 border-t">
-                        <span>Total:</span>
-                        <span>${calculateTotal()}</span>
-                      </div>
-                    </div>
+              {/* End Date/Time */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="endDate">End Date</Label>
+                  <Input
+                    id="endDate"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    min={startDate || new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="endTime">End Time</Label>
+                  <Input
+                    id="endTime"
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Cost Summary */}
+              {totalCost > 0 && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">Total Cost</span>
+                    <span className="text-2xl font-bold text-green-600">${totalCost.toFixed(2)}</span>
                   </div>
                 </div>
-              </>
-            )}
-
-            {/* Action Buttons */}
-            <div className="mt-8 flex gap-4">
-              {step === 'payment' && (
-                <button
-                  onClick={() => setStep('time')}
-                  className="flex-1 border border-gray-200 py-3 px-4 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
-                >
-                  Back
-                </button>
               )}
-              <button
+
+              {/* Security Notice */}
+              <div className="flex items-start space-x-2 p-4 bg-blue-50 rounded-lg">
+                <Shield className="h-5 w-5 text-blue-600 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium">Secure Booking</p>
+                  <p>Your booking is protected and you'll receive a QR code for entry.</p>
+                </div>
+              </div>
+
+              {/* Book Button */}
+              <Button
                 onClick={handleBooking}
-                disabled={
-                  (step === 'time' && (!startDate || !startTime || !endTime || !selectedVehicle || calculateDuration() <= 0)) ||
-                  (step === 'payment' && !paymentMethod)
-                }
-                className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                disabled={isBooking || !selectedVehicle || !startDate || !startTime || !endDate || !endTime}
+                className="w-full"
+                size="lg"
               >
-                {step === 'time' ? 'Proceed to Payment' : 'Confirm Booking'}
-              </button>
-            </div>
-          </div>
+                {isBooking ? 'Processing...' : `Book Now - $${totalCost.toFixed(2)}`}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
